@@ -98,6 +98,41 @@ async def test_identifier_first_flow_with_relative_resume_path(
 
 
 @pytest.mark.asyncio
+async def test_identifier_first_flow_with_absolute_resume_url(
+    connection: Connection, routes,
+):
+    """Regression: some accounts get an absolute Location from /u/login/password.
+
+    Previously the f-string concatenation produced
+    `https://identity.porsche.comhttps://my.porsche.com/...` and crashed with
+    a DNS error. With urljoin(), the absolute URL is followed as-is and the
+    `code` parameter is extracted from its redirect.
+    """
+    absolute_resume = "https://my.porsche.com/?continue=resume&state=ST"
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(
+        return_value=httpx.Response(200),
+    )
+    routes.post("/u/login/password").mock(
+        return_value=_redirect(absolute_resume),
+    )
+    # respx is base_url-scoped to identity.porsche.com — register the
+    # cross-host route via the global router so the redirect is followed.
+    with respx.mock(assert_all_called=False) as outer:
+        outer.get(absolute_resume).mock(
+            return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+        )
+        routes.post("/oauth/token").mock(
+            return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+        )
+        await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+
+
+@pytest.mark.asyncio
 async def test_captcha_required_raises_with_payload_and_state(
     connection: Connection, routes,
 ):
