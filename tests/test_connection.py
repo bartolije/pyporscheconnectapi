@@ -1,6 +1,7 @@
 """Tests for pyporscheconnectapi.connection.Connection."""
 from __future__ import annotations
 
+import asyncio
 import time
 
 import httpx
@@ -14,6 +15,7 @@ from pyporscheconnectapi.const import (
     REDIRECT_URI,
     TOKEN_URL,
 )
+from pyporscheconnectapi.exceptions import PorscheExceptionError
 
 TOKEN_PAYLOAD = {
     "access_token": "fresh.access.token",
@@ -115,3 +117,102 @@ async def test_request_attaches_bearer_authorization_header(
 
     auth_header = route.calls.last.request.headers.get("Authorization")
     assert auth_header == "Bearer test.access.token"
+
+
+# -- Transient-error retry (issues #61 and #63) ----------------------------
+
+
+@pytest.fixture
+def _fast_retries(monkeypatch):
+    """Make asyncio.sleep instant so retry-tests don't burn real seconds."""
+    real_sleep = asyncio.sleep
+
+    async def _instant(_seconds, *a, **kw):
+        await real_sleep(0)
+
+    monkeypatch.setattr("pyporscheconnectapi.connection.asyncio.sleep", _instant)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_retries_on_504_then_succeeds(
+    authed_connection: Connection,
+):
+    """A 504 Gateway Timeout should be retried, not propagated. Regression
+    for upstream issue #61: polling for a remote service status timed out
+    and bubbled up as PorscheExceptionError, marking every entity
+    Unavailable in HA.
+    """
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V/commands/X").mock(
+            side_effect=[
+                httpx.Response(504, json={}),
+                httpx.Response(504, json={}),
+                httpx.Response(200, json={"status": {"result": "PERFORMED"}}),
+            ],
+        )
+
+        result = await authed_connection.get("/connect/v1/vehicles/V/commands/X")
+
+    assert result == {"status": {"result": "PERFORMED"}}
+    assert route.call_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_retries_on_429_then_succeeds(
+    authed_connection: Connection,
+):
+    """A 429 Too Many Requests should be retried. Regression for upstream
+    issue #63: every Porsche Connect entity went Unavailable until HA was
+    restarted manually.
+    """
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V").mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "1"}),
+                httpx.Response(200, json={"vin": "V"}),
+            ],
+        )
+
+        result = await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert result == {"vin": "V"}
+    assert route.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_does_not_retry_on_400(
+    authed_connection: Connection,
+):
+    """A 400 Bad Request is a client error — raise immediately, don't retry."""
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V").mock(
+            return_value=httpx.Response(400, json={}),
+        )
+
+        with pytest.raises(PorscheExceptionError) as exc_info:
+            await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert exc_info.value.code == 400
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_gives_up_after_max_retries(
+    authed_connection: Connection,
+):
+    """If the server keeps returning 504, eventually raise PorscheExceptionError."""
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V").mock(
+            return_value=httpx.Response(504, json={}),
+        )
+
+        with pytest.raises(PorscheExceptionError) as exc_info:
+            await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert exc_info.value.code == 504
+    # 1 initial attempt + 3 retries = 4 calls.
+    assert route.call_count == 4
