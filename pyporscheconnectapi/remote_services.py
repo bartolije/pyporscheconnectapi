@@ -53,12 +53,20 @@ class RemoteServiceStatus:
 
     def __init__(self, response: dict, status_id: str | None = None) -> None:
         """Construct a new object from a dict."""
+        # `response` must be a dict shaped like `{"status": {"result": "..."}}`.
+        # Callers passing a bare result code (e.g. "PERFORMED") would silently
+        # land in the UNKNOWN state because `"status" in "PERFORMED"` is False.
         status = None
-        if "status" in response:
+        if isinstance(response, dict) and "status" in response:
             status = response.get("status", {}).get("result")
 
         self.status = status
-        self.state = ExecutionState(status or "UNKNOWN")
+        # Tolerate result codes outside the enum (e.g. "REJECTED" if the API
+        # ever introduces one) rather than raising during construction.
+        try:
+            self.state = ExecutionState(status or "UNKNOWN")
+        except ValueError:
+            self.state = ExecutionState.UNKNOWN
         self.details = response
         self.status_id = status_id
 
@@ -296,7 +304,14 @@ class RemoteServices:
 
         _LOGGER.debug("Got result: %s (%s)", result_code, status_id)
 
-        status = await self._block_until_done(status_id) if status_id and result_code == "ACCEPTED" else RemoteServiceStatus(result_code)
+        # For an immediate (non-ACCEPTED) result, wrap the bare result code in
+        # the same dict shape the polling endpoint returns so the constructor
+        # can extract it the same way — otherwise `state` would silently stay
+        # UNKNOWN for PERFORMED/ERROR replies.
+        if status_id and result_code == "ACCEPTED":
+            status = await self._block_until_done(status_id)
+        else:
+            status = RemoteServiceStatus({"status": {"result": result_code}})
 
         await asyncio.sleep(_POLLING_DELAY)
         await self._vehicle.get_stored_overview()
