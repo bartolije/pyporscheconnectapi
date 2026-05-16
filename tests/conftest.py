@@ -1,6 +1,8 @@
 """Shared pytest fixtures."""
 from __future__ import annotations
 
+import time
+
 import httpx
 import pytest
 
@@ -26,6 +28,29 @@ async def connection(email: str, password: str):
     """
     async with httpx.AsyncClient() as client:
         conn = Connection(email=email, password=password, async_client=client)
+        try:
+            yield conn
+        finally:
+            await conn.close()
+
+
+@pytest.fixture
+async def authed_connection(email: str, password: str):
+    """A Connection pre-seeded with a valid (non-expired) OAuth2 token.
+
+    Avoids respx-mocking the full OAuth dance in tests that only care about
+    the application-level API calls (vehicles, commands, etc.).
+    """
+    token = {
+        "access_token": "test.access.token",
+        "refresh_token": "test.refresh.token",
+        "expires_at": int(time.time()) + 3600,
+        "token_type": "Bearer",
+    }
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client, token=token,
+        )
         try:
             yield conn
         finally:
