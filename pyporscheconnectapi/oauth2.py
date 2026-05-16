@@ -7,6 +7,7 @@ import binascii
 import json
 import logging
 import re
+import secrets
 import time
 from typing import NamedTuple
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -160,7 +161,9 @@ class OAuth2Client:
                         "redirect_uri": REDIRECT_URI,
                         "audience": AUDIENCE,
                         "scope": SCOPE,
-                        "state": "pyporscheconnectapi",
+                        # Anti-CSRF token, regenerated per request.
+                        # RFC 6749 §10.12 recommends a non-guessable value.
+                        "state": secrets.token_urlsafe(16),
                     },
                 )
                 # If Auth0 already has a session, /authorize returns the code
@@ -279,10 +282,9 @@ class OAuth2Client:
             _LOGGER.debug("Submitting e-mail address to auth endpoint.")
         else:
             data.update({"captcha": self.captcha.captcha_code})
-            _LOGGER.debug(
-                "Submitting e-mail address and captcha code %s to auth endpoint.",
-                self.captcha.captcha_code,
-            )
+            # Do not log the captcha code itself — it is a single-use secret
+            # and ends up in user-shared logs otherwise.
+            _LOGGER.debug("Submitting e-mail address and captcha code to auth endpoint.")
 
         url = f"https://{AUTHORIZATION_SERVER}/u/login/identifier"
         resp = await self.client.post(
