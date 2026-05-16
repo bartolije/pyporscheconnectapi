@@ -49,13 +49,21 @@ class PorscheWrongCredentialsError(PorscheExceptionError):
 class PorscheCaptchaRequiredError(PorscheExceptionError):
     """Class of exception when captcha verification is required."""
 
-    captcha: str = None
-    state: str = None
+    captcha: str | None = None
+    state: str | None = None
 
     def __init__(self, captcha=None, state=None):
         """Initialize the captcha exception."""
         if captcha is not None and state is not None:
-            _LOGGER.info("Initialising captcha exception: %s, %s", captcha, state)
+            # The captcha payload is a ~14 KB base64 SVG data URI. At INFO
+            # level it floods the HA logbook every login attempt; emit it
+            # at DEBUG and only with a byte-count + state to keep the
+            # signal useful for support without dumping the SVG body.
+            _LOGGER.debug(
+                "Captcha required (state=%s, payload_bytes=%d)",
+                state,
+                len(captcha),
+            )
             self.captcha = captcha
             self.state = state
 

@@ -295,10 +295,10 @@ class OAuth2Client:
             _LOGGER.debug("Submitting e-mail address to auth endpoint.")
         else:
             data.update({"captcha": self.captcha.captcha_code})
-            _LOGGER.debug(
-                "Submitting e-mail address and captcha code %s to auth endpoint.",
-                self.captcha.captcha_code,
-            )
+            # The captcha code is single-use, but logging it in cleartext
+            # still ends up in user-shared HA / debug-mode logs. Log the
+            # presence only.
+            _LOGGER.debug("Submitting e-mail address and captcha code to auth endpoint.")
 
         url = f"https://{AUTHORIZATION_SERVER}/u/login/identifier"
         resp = await self.client.post(
