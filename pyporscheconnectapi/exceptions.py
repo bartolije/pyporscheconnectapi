@@ -49,13 +49,19 @@ class PorscheWrongCredentialsError(PorscheExceptionError):
 class PorscheCaptchaRequiredError(PorscheExceptionError):
     """Class of exception when captcha verification is required."""
 
-    captcha: str = None
-    state: str = None
+    captcha: str | None = None
+    state: str | None = None
 
     def __init__(self, captcha=None, state=None):
         """Initialize the captcha exception."""
         if captcha is not None and state is not None:
-            _LOGGER.info("Initialising captcha exception: %s, %s", captcha, state)
+            # Don't log the captcha payload itself — it's a ~14 KB base64
+            # data URI and floods INFO-level logs / HA logbook otherwise.
+            _LOGGER.debug(
+                "Captcha required (state=%s, payload_bytes=%d)",
+                state,
+                len(captcha),
+            )
             self.captcha = captcha
             self.state = state
 
