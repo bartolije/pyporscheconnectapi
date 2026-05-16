@@ -7,6 +7,7 @@ import binascii
 import json
 import logging
 import re
+import secrets
 import time
 from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
@@ -156,7 +157,11 @@ class OAuth2Client:
                         "redirect_uri": REDIRECT_URI,
                         "audience": AUDIENCE,
                         "scope": SCOPE,
-                        "state": "pyporscheconnectapi",
+                        # Anti-CSRF token, regenerated per request — RFC 6749
+                        # §10.12 recommends a non-guessable value. Auth0 echoes
+                        # it back, so downstream code uses the echoed value;
+                        # the literal we send here only needs to be unique.
+                        "state": secrets.token_urlsafe(16),
                     },
                 )
                 authorization_code = params.get("code", [None])[0]
