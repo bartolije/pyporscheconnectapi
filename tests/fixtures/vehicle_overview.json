@@ -1,0 +1,51 @@
+{
+  "vin": "WP0ZZZY1ZZS000001",
+  "modelName": "Taycan",
+  "customName": "My Taycan",
+  "modelType": {
+    "year": "2023",
+    "engine": "BEV",
+    "model": "Taycan"
+  },
+  "systemInfo": {
+    "name": "PCM6"
+  },
+  "timestamp": "2024-01-01T12:00:00Z",
+  "measurements": [
+    {
+      "key": "BATTERY_LEVEL",
+      "status": {"isEnabled": true},
+      "value": {"percent": 73}
+    },
+    {
+      "key": "CLIMATIZER_STATE",
+      "status": {"isEnabled": true},
+      "value": {"isOn": false}
+    },
+    {
+      "key": "REMOTE_ACCESS_AUTHORIZATION",
+      "status": {"isEnabled": true},
+      "value": {"isEnabled": true}
+    },
+    {
+      "key": "TIRE_PRESSURE",
+      "status": {"isEnabled": true},
+      "value": {
+        "frontLeftTire": {"differenceBar": 0.05},
+        "frontRightTire": {"differenceBar": -0.10},
+        "rearLeftTire": {"differenceBar": 0.02},
+        "rearRightTire": {"differenceBar": 0.07}
+      }
+    },
+    {
+      "key": "GLOBAL_PRIVACY_MODE",
+      "status": {"isEnabled": true},
+      "value": {"isEnabled": false}
+    },
+    {
+      "key": "LOCK_STATE_VEHICLE",
+      "status": {"isEnabled": true},
+      "value": {"isLocked": true}
+    }
+  ]
+}
