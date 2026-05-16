@@ -288,6 +288,80 @@ async def test_set_target_soc_uses_charging_profiles_when_no_departures(
     assert inactive["minSoc"] == 40
 
 
+# -- Regressions -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_immediate_performed_response_yields_performed_state(
+    authed_connection: Connection, api_routes, monkeypatch,
+):
+    """When /commands returns a terminal PERFORMED with no status id, the
+    returned RemoteServiceStatus must reflect PERFORMED, not UNKNOWN.
+
+    Regression: prior to the fix, _send_command called
+    `RemoteServiceStatus(result_code)` with a bare string, the constructor
+    then ran `"status" in "PERFORMED"` (a string-in-string check) → False,
+    `state` silently fell through to UNKNOWN. Callers had no way to tell a
+    successful action from a server timeout.
+    """
+    await _drain_polling_sleep(monkeypatch)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(
+            200,
+            json={"status": {"result": "PERFORMED"}},
+        ),
+    )
+
+    vehicle = _make_vehicle(authed_connection)
+    status = await vehicle.remote_services.flash_indicators()
+    assert status.state == ExecutionState.PERFORMED
+
+
+@pytest.mark.asyncio
+async def test_immediate_error_response_yields_error_state(
+    authed_connection: Connection, api_routes, monkeypatch,
+):
+    """An immediate ERROR result is reported as ExecutionState.ERROR.
+
+    Same regression class as the PERFORMED case — making sure we don't
+    flatten distinct outcomes to UNKNOWN.
+    """
+    await _drain_polling_sleep(monkeypatch)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(
+            200,
+            json={"status": {"result": "ERROR"}},
+        ),
+    )
+
+    vehicle = _make_vehicle(authed_connection)
+    status = await vehicle.remote_services.flash_indicators()
+    assert status.state == ExecutionState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_immediate_unknown_result_code_does_not_crash(
+    authed_connection: Connection, api_routes, monkeypatch,
+):
+    """A result code outside the ExecutionState enum (e.g. a future
+    `REJECTED`) must not raise during RemoteServiceStatus construction —
+    it falls back to UNKNOWN.
+    """
+    await _drain_polling_sleep(monkeypatch)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(
+            200,
+            json={"status": {"result": "REJECTED"}},
+        ),
+    )
+
+    vehicle = _make_vehicle(authed_connection)
+    status = await vehicle.remote_services.flash_indicators()
+    assert status.state == ExecutionState.UNKNOWN
+    # The original result code is still accessible via .status for debugging.
+    assert status.status == "REJECTED"
+
+
 # -- Failure paths ---------------------------------------------------------
 
 
