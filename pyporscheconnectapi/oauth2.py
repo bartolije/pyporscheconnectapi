@@ -143,11 +143,15 @@ class OAuth2Client:
 
         :return: authorization code to be exchanged for an access token
         """
-        if self.captcha.captcha_code is None:
-            try:
+        try:
+            # When retrying after a captcha challenge, the caller has already
+            # been through /authorize once (the state is carried in
+            # self.captcha.state). Skip that round-trip and resume the
+            # Identifier First flow directly.
+            if self.captcha.captcha_code is not None:
+                state = self.captcha.state
+            else:
                 _LOGGER.debug("Fetching authorization code.")
-
-                # first request to get the code
                 params = await self.get_and_extract_location_params(
                     AUTHORIZATION_URL,
                     params={
@@ -159,47 +163,27 @@ class OAuth2Client:
                         "state": "pyporscheconnectapi",
                     },
                 )
-                authorization_code = params.get("code", [None])[0]
-
-                # if we already have a session with Auth, just use the code they return
-                if authorization_code is not None:
-                    _LOGGER.debug("Got authorization code: %s", authorization_code)
-                    return authorization_code
-
-                # no existing Auth0 session, run through Identifier First flow
+                # If Auth0 already has a session, /authorize returns the code
+                # directly — no identifier flow needed.
+                if (code := params.get("code", [None])[0]) is not None:
+                    _LOGGER.debug("Got authorization code from existing session.")
+                    return code
                 _LOGGER.debug(
                     "No existing auth0 session, running through identifier first flow.",
                 )
+                state = params["state"][0]
 
-                resume_path = await self.login_with_identifier(params["state"][0])
+            resume_path = await self.login_with_identifier(state)
+            params = await self.get_and_extract_location_params(
+                urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
+            )
+            authorization_code = params.get("code", [None])[0]
 
-                # completed the Identifier First flow, now resume the auth code request
-                params = await self.get_and_extract_location_params(
-                    urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
-                )
-                authorization_code = params.get("code", [None])[0]
+        except httpx.HTTPStatusError as exc:
+            raise PorscheExceptionError(exc.response.status_code) from exc
 
-            except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(exc.response.status_code) from exc
-
-            else:
-                _LOGGER.debug("Authorization code: %s", authorization_code)
-                return authorization_code
-
-        else:
-            try:
-                resume_path = await self.login_with_identifier(self.captcha.state)
-                params = await self.get_and_extract_location_params(
-                    urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
-                )
-                authorization_code = params.get("code", [None])[0]
-
-            except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(exc.response.status_code) from exc
-
-            else:
-                _LOGGER.debug("Authorization code: %s", authorization_code)
-                return authorization_code
+        _LOGGER.debug("Authorization code: %s", authorization_code)
+        return authorization_code
 
     async def get_and_extract_location_params(self, url, params=None):
         """GET the URL and extract the params from the Location header.
