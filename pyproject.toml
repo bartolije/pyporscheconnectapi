@@ -11,3 +11,9 @@ ignore = [ "ANN", "PLR2004", "PLR0912", "PLR0913", "TC001", "C901", "B008", "D20
 
 [tool.ruff.lint.per-file-ignores]
 "examples/*.py" = [ "INP001", "T201" ]
+"tests/*.py" = [ "INP001", "S101", "D", "ARG001", "S105", "S106" ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
