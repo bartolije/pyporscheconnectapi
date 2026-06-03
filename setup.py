@@ -6,8 +6,8 @@ from pathlib import Path
 from setuptools import setup
 
 setup(
-    name="pyporscheconnectapi",
-    version="0.2.7",
+    name="pyporscheconnectapi-bartolije",
+    version="0.3.0",
     author="Johan Isaksson",
     author_email="johan@generatorhallen.se",
     description="Python library and CLI for communicating with Porsche Connect API.",

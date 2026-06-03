@@ -216,3 +216,79 @@ async def test_request_gives_up_after_max_retries(
     assert exc_info.value.code == 504
     # 1 initial attempt + 3 retries = 4 calls.
     assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_retries_on_transport_error_then_succeeds(
+    authed_connection: Connection,
+):
+    """A transport error (e.g. connection reset) is retried, then succeeds."""
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V").mock(
+            side_effect=[httpx.ConnectError("boom"), httpx.Response(200, json={"vin": "V"})],
+        )
+
+        result = await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert result == {"vin": "V"}
+    assert route.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_wraps_persistent_transport_error(
+    authed_connection: Connection,
+):
+    """A persistent transport error is wrapped in PorscheExceptionError after retries."""
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        route = router.get("/connect/v1/vehicles/V").mock(
+            side_effect=httpx.ConnectError("down"),
+        )
+
+        with pytest.raises(PorscheExceptionError):
+            await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert route.call_count == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_reauths_once_on_401_then_succeeds(
+    authed_connection: Connection,
+):
+    """A 401 forces a single token refresh then retries the request successfully."""
+    with respx.mock(assert_all_called=False) as router:
+        token_route = router.post(TOKEN_URL).mock(
+            return_value=httpx.Response(200, json=REFRESHED_TOKEN_PAYLOAD),
+        )
+        api_route = router.get(f"{API_BASE_URL}/connect/v1/vehicles/V").mock(
+            side_effect=[httpx.Response(401, json={}), httpx.Response(200, json={"vin": "V"})],
+        )
+
+        result = await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert result == {"vin": "V"}
+    assert token_route.call_count == 1
+    assert api_route.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fast_retries")
+async def test_request_raises_after_second_401(
+    authed_connection: Connection,
+):
+    """If a 401 persists after the forced refresh, raise PorscheExceptionError(401)."""
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(
+            return_value=httpx.Response(200, json=REFRESHED_TOKEN_PAYLOAD),
+        )
+        api_route = router.get(f"{API_BASE_URL}/connect/v1/vehicles/V").mock(
+            return_value=httpx.Response(401, json={}),
+        )
+
+        with pytest.raises(PorscheExceptionError) as exc_info:
+            await authed_connection.get("/connect/v1/vehicles/V")
+
+    assert exc_info.value.code == 401
+    assert api_route.call_count == 2

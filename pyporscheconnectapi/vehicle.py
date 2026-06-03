@@ -9,7 +9,6 @@ import re
 import uuid
 
 from pyporscheconnectapi.connection import Connection
-from pyporscheconnectapi.exceptions import PorscheExceptionError
 from pyporscheconnectapi.remote_services import RemoteServices
 
 from .const import COMMANDS, MEASUREMENTS, TIRE_PRESSURE_TOLERANCE, TRIP_STATISTICS
@@ -97,7 +96,8 @@ class PorscheVehicle:
     @property
     def has_electric_drivetrain(self) -> bool:
         """Return True if vehicle is equipped with a high voltage battery."""
-        return self.data["modelType"]["engine"] == "BEV" or self.data["modelType"]["engine"] == "PHEV"
+        engine = self.data.get("modelType", {}).get("engine")
+        return engine in ("BEV", "PHEV")
 
     @property
     def main_battery_level(self) -> int:
@@ -110,7 +110,8 @@ class PorscheVehicle:
     @property
     def has_ice_drivetrain(self) -> bool:
         """Return True if vehicle has an internal combustion engine."""
-        return self.data["modelType"]["engine"] == "PHEV" or self.data["modelType"]["engine"] == "COMBUSTION"
+        engine = self.data.get("modelType", {}).get("engine")
+        return engine in ("PHEV", "COMBUSTION")
 
     @property
     def has_remote_climatisation(self) -> bool:
@@ -120,7 +121,8 @@ class PorscheVehicle:
     @property
     def has_direct_charge(self) -> bool:
         """Return True if vehicle has direct charge ability."""
-        return self.data["modelType"]["engine"] == "BEV" or self.data["modelType"]["engine"] == "PHEV"
+        engine = self.data.get("modelType", {}).get("engine")
+        return engine in ("BEV", "PHEV")
 
     @property
     def direct_charge_on(self) -> bool:
@@ -258,80 +260,50 @@ class PorscheVehicle:
         """Return stored vechicle status overview."""
         measurements = "mf=" + "&mf=".join(MEASUREMENTS)
 
-        try:
-            _LOGGER.debug("Getting stored status for vehicle %s", self.vin)
-            self.status = await self.connection.get(
-                f"/connect/v1/vehicles/{self.vin}?{measurements}",
-            )
-            self._update_vehicle_data()
-        except PorscheExceptionError as err:
-            _LOGGER.exception(
-                "Could not get stored overview, error communicating with API: '%s",
-                err.message,
-            )
+        _LOGGER.debug("Getting stored status for vehicle %s", self.vin)
+        self.status = await self.connection.get(
+            f"/connect/v1/vehicles/{self.vin}?{measurements}",
+        )
+        self._update_vehicle_data()
 
     async def get_current_overview(self) -> None:
         """Return vehicle current status overview."""
         measurements = "mf=" + "&mf=".join(MEASUREMENTS)
         wakeup = "&wakeUpJob=" + str(uuid.uuid4())
 
-        try:
-            _LOGGER.debug("Getting current status for vehicle %s", self.vin)
-            self.status = await self.connection.get(
-                f"/connect/v1/vehicles/{self.vin}?{measurements + wakeup}",
-            )
-            self._update_vehicle_data()
-        except PorscheExceptionError as err:
-            _LOGGER.exception(
-                "Could not get current overview, error communicating with API: '%s",
-                err.message,
-            )
+        _LOGGER.debug("Getting current status for vehicle %s", self.vin)
+        self.status = await self.connection.get(
+            f"/connect/v1/vehicles/{self.vin}?{measurements + wakeup}",
+        )
+        self._update_vehicle_data()
 
     async def get_capabilities(self) -> None:
         """Return vehicle capabilities."""
         measurements = "mf=" + "&mf=".join(MEASUREMENTS)
         commands = "&cf=" + "&cf=".join(COMMANDS)
 
-        try:
-            _LOGGER.debug("Getting capabilities for vehicle %s", self.vin)
-            self.capabilities = await self.connection.get(
-                f"/connect/v1/vehicles/{self.vin}?{measurements + commands}",
-            )
-        except PorscheExceptionError as err:
-            _LOGGER.exception(
-                "Could not get capabilities, error communicating with API: %s",
-                err.message,
-            )
+        _LOGGER.debug("Getting capabilities for vehicle %s", self.vin)
+        self.capabilities = await self.connection.get(
+            f"/connect/v1/vehicles/{self.vin}?{measurements + commands}",
+        )
 
     async def get_trip_statistics(self) -> None:
         """Return trip statistics for vehicle as a dict."""
         measurements = "mf=" + "&mf=".join(TRIP_STATISTICS)
 
-        try:
-            _LOGGER.debug("Getting trip statistics for vehicle %s", self.vin)
-            self.trip_statistics = await self.connection.get(
-                f"/connect/v1/vehicles/{self.vin}?{measurements}",
-            )
-        except PorscheExceptionError as err:
-            _LOGGER.exception(
-                "Could not get capabilities, error communicating with API: %s",
-                err.message,
-            )
+        _LOGGER.debug("Getting trip statistics for vehicle %s", self.vin)
+        self.trip_statistics = await self.connection.get(
+            f"/connect/v1/vehicles/{self.vin}?{measurements}",
+        )
 
     async def get_picture_locations(self) -> None:
         """Return list of uri's to vechicle pictures."""
-        try:
-            _LOGGER.debug("Getting picture urls for vehicle %s", self.vin)
-            resp = await self.connection.get(
-                f"/connect/v1/vehicles/{self.vin}/pictures",
-            )
-            for p in resp:
-                self.picture_locations[p["view"]] = p["url"]
-        except PorscheExceptionError as err:
-            _LOGGER.exception(
-                "Could not get capabilities, error communicating with API: %s",
-                err.message,
-            )
+        _LOGGER.debug("Getting picture urls for vehicle %s", self.vin)
+        resp = await self.connection.get(
+            f"/connect/v1/vehicles/{self.vin}/pictures",
+        )
+        for p in resp:
+            self.picture_locations[p["view"]] = p["url"]
 
     def __repr__(self) -> str:
         """Return a printable representation of the Porsche Connect Vehicle object."""
@@ -384,7 +356,7 @@ class PorscheVehicle:
                     # If charging profiles are enabled, get minSoC from this dict.
                     mdata["CHARGING_SUMMARY"]["minSoC"] = mdata["CHARGING_SUMMARY"]["chargingProfile"]["minSoC"]
 
-                if "DEPARTURES" in mdata and mdata.get("CHARGING_SETTINGS", {}).get("targetSoc"):
+                if "DEPARTURES" in mdata and "CHARGING_SUMMARY" in mdata and mdata.get("CHARGING_SETTINGS", {}).get("targetSoc"):
                     # If charging on departures are enabled, get minSoC from the CHARGING_SETTINGS dict.
                     mdata["CHARGING_SUMMARY"]["minSoC"] = mdata["CHARGING_SETTINGS"]["targetSoc"]
 

@@ -9,7 +9,7 @@ from enum import Enum
 from hashlib import sha512
 from typing import TYPE_CHECKING
 
-from .exceptions import PorscheRemoteServiceError
+from .exceptions import PorscheExceptionError, PorscheRemoteServiceError
 
 if TYPE_CHECKING:
     from .vehicle import PorscheVehicle
@@ -314,7 +314,15 @@ class RemoteServices:
             status = RemoteServiceStatus({"status": {"result": result_code}})
 
         await asyncio.sleep(_POLLING_DELAY)
-        await self._vehicle.get_stored_overview()
+        # A post-command status refresh is best-effort: the command itself
+        # already succeeded, so a transient API hiccup here must not mask that.
+        try:
+            await self._vehicle.get_stored_overview()
+        except PorscheExceptionError as exc:
+            _LOGGER.debug(
+                "Post-command status refresh failed for %s: %s",
+                self._vehicle.vin, exc,
+            )
 
         return status
 

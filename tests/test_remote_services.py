@@ -397,3 +397,24 @@ async def test_remote_service_propagates_http_error(
     with pytest.raises(PorscheExceptionError) as exc_info:
         await vehicle.remote_services.flash_indicators()
     assert exc_info.value.code == 500
+
+
+@pytest.mark.asyncio
+async def test_send_command_succeeds_even_if_post_refresh_fails(
+    authed_connection: Connection, monkeypatch,
+):
+    """A failing post-command status refresh must not mask command success."""
+    await _drain_polling_sleep(monkeypatch)
+    with respx.mock(base_url=API_BASE_URL, assert_all_called=False) as router:
+        router.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+            return_value=httpx.Response(200, json={"status": {"result": "PERFORMED"}}),
+        )
+        # Trailing get_stored_overview() blows up - must be swallowed.
+        router.get(url__regex=rf".*/connect/v1/vehicles/{VIN}?.*").mock(
+            return_value=httpx.Response(500, json={}),
+        )
+
+        vehicle = _make_vehicle(authed_connection)
+        status = await vehicle.remote_services.flash_indicators()
+
+    assert status.state == ExecutionState.PERFORMED
