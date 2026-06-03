@@ -21,12 +21,13 @@ _LOGGER = logging.getLogger(__name__)
 # per the upstream maintainer's comments on issues #61 and #63.
 _RETRY_STATUS_CODES = frozenset({429, 502, 503, 504})
 _MAX_RETRIES = 3
+HTTP_UNAUTHORIZED = 401
 # Cap a single retry delay so a misbehaving server can't pin a caller for
 # minutes on a Retry-After header.
 _MAX_RETRY_DELAY = 30.0
 
 
-def _compute_retry_delay(response: httpx.Response, attempt: int) -> float:
+def _compute_retry_delay(response: httpx.Response | None, attempt: int) -> float:
     """Return how many seconds to wait before retrying after a transient error.
 
     Prefer the server-provided Retry-After header (RFC 9110 §10.2.3) when
@@ -34,7 +35,7 @@ def _compute_retry_delay(response: httpx.Response, attempt: int) -> float:
     practice by the Porsche API on 429. Otherwise fall back to exponential
     backoff (1s, 2s, 4s) with jitter to spread out concurrent retries.
     """
-    retry_after = response.headers.get("retry-after", "")
+    retry_after = response.headers.get("retry-after", "") if response is not None else ""
     if retry_after.isdigit():
         return min(float(retry_after), _MAX_RETRY_DELAY)
     # secrets.randbelow keeps this deterministic-free without pulling random.
@@ -121,6 +122,7 @@ class Connection:
         async with self.token_lock:
             await self.oauth2_client.ensure_valid_token(self.token)
 
+        reauthed = False
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 resp = await self.asyncClient.request(
@@ -134,12 +136,41 @@ class Connection:
                 return resp.json()
             except httpx.HTTPStatusError as exc:  # noqa: PERF203
                 status = exc.response.status_code
+                # A 401 means the access token was rejected server-side (revoked,
+                # clock skew, ...). Force one re-authentication and retry before
+                # giving up - avoids a spurious reauth/captcha prompt in HA for a
+                # token a refresh can still recover.
+                if status == HTTP_UNAUTHORIZED and not reauthed:
+                    reauthed = True
+                    _LOGGER.warning("401 on %s - forcing token refresh and retrying once", url)
+                    async with self.token_lock:
+                        # Non-zero past timestamp on purpose: is_expired() treats
+                        # 0 as "no expiry info" (→ full re-login), whereas 1
+                        # forces the cheaper refresh path first and only
+                        # escalates to a full login if the refresh itself fails.
+                        self.token["expires_at"] = 1
+                        await self.oauth2_client.ensure_valid_token(self.token)
+                    continue
                 if status not in _RETRY_STATUS_CODES or attempt == _MAX_RETRIES:
                     raise PorscheExceptionError(status) from exc
                 delay = _compute_retry_delay(exc.response, attempt)
                 _LOGGER.warning(
                     "Transient HTTP %s on %s - retrying in %.1fs (attempt %d/%d)",
                     status, url, delay, attempt + 1, _MAX_RETRIES,
+                )
+                await asyncio.sleep(delay)
+            except httpx.TransportError as exc:
+                # Network-level hiccups (timeouts, connection resets, protocol
+                # errors) are the most common transient failure and were
+                # previously neither retried nor wrapped - they bubbled up as a
+                # raw httpx error. Retry with backoff, then wrap.
+                if attempt == _MAX_RETRIES:
+                    msg = f"transport error on {url}: {exc}"
+                    raise PorscheExceptionError(msg) from exc
+                delay = _compute_retry_delay(None, attempt)
+                _LOGGER.warning(
+                    "Transient transport error on %s (%s) - retrying in %.1fs (attempt %d/%d)",
+                    url, exc.__class__.__name__, delay, attempt + 1, _MAX_RETRIES,
                 )
                 await asyncio.sleep(delay)
 

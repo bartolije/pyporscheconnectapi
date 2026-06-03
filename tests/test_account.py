@@ -7,7 +7,7 @@ import respx
 
 from pyporscheconnectapi.account import PorscheConnectAccount
 from pyporscheconnectapi.connection import Connection
-from pyporscheconnectapi.const import API_BASE_URL
+from pyporscheconnectapi.const import API_BASE_URL, TOKEN_URL
 from pyporscheconnectapi.exceptions import PorscheExceptionError
 from pyporscheconnectapi.vehicle import PorscheVehicle
 
@@ -87,16 +87,33 @@ async def test_get_vehicle_resolves_specific_vin(
 
 @pytest.mark.asyncio
 async def test_get_vehicles_propagates_auth_failure(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
 ):
-    """A 401 from the API surfaces as PorscheExceptionError."""
-    api_routes.get("/connect/v1/vehicles").mock(
-        return_value=httpx.Response(401, json={"error": "unauthorized"}),
-    )
+    """A persistent 401 still surfaces as PorscheExceptionError(401).
 
-    account = PorscheConnectAccount(connection=authed_connection)
-    with pytest.raises(PorscheExceptionError) as exc_info:
-        await account.get_vehicles()
+    Connection.request() now makes one forced re-auth attempt on a 401 (the
+    refresh succeeds here) before retrying; when the API keeps returning 401
+    the error must ultimately propagate so the integration can trigger reauth.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "refreshed.access.token",
+                    "refresh_token": "refreshed.refresh.token",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                },
+            ),
+        )
+        router.get(f"{API_BASE_URL}/connect/v1/vehicles").mock(
+            return_value=httpx.Response(401, json={"error": "unauthorized"}),
+        )
+
+        account = PorscheConnectAccount(connection=authed_connection)
+        with pytest.raises(PorscheExceptionError) as exc_info:
+            await account.get_vehicles()
     assert exc_info.value.code == 401
     assert exc_info.value.message == "UNAUTHORIZED"
 
