@@ -1,0 +1,130 @@
+{
+  "vin": "WP0ZZZ98ZZS000002",
+  "modelName": "718 Cayman GT4 RS",
+  "modelType": {
+    "code": "982850",
+    "year": "2022",
+    "steeringPosition": "LEFT_HAND_DRIVE",
+    "purposeOrderType": "KF",
+    "body": "COUPE",
+    "generation": "982",
+    "revision": 2,
+    "model": "CAYMAN",
+    "engine": "COMBUSTION"
+  },
+  "systemInfo": {
+    "driverExperience": "0.5",
+    "privacyStyle": 1,
+    "cluster": "10"
+  },
+  "exteriorColorName": "Arctic Grey",
+  "color": {
+    "primaryExteriorColor": "6A6C70"
+  },
+  "connect": true,
+  "vehicleUserType": "PRIMARY",
+  "timestamp": "2024-01-01T12:00:00Z",
+  "commands": [],
+  "measurements": [
+    {"key": "E_RANGE", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
+    {"key": "BATTERY_LEVEL", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
+    {"key": "CHARGING_SUMMARY", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
+    {"key": "CLIMATIZER_STATE", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
+    {
+      "key": "GLOBAL_PRIVACY_MODE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T12:00:00Z", "isEnabled": false}
+    },
+    {
+      "key": "GPS_LOCATION",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:50:00Z", "location": "48.858200,2.294500", "direction": 248}
+    },
+    {
+      "key": "FUEL_LEVEL",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "percent": 64}
+    },
+    {
+      "key": "FUEL_RESERVE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "percent": 15}
+    },
+    {
+      "key": "RANGE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "kilometers": 351}
+    },
+    {
+      "key": "MILEAGE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "kilometers": 14084}
+    },
+    {
+      "key": "MAIN_SERVICE_RANGE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "kilometers": 14900}
+    },
+    {
+      "key": "MAIN_SERVICE_TIME",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "days": 564}
+    },
+    {
+      "key": "OIL_SERVICE_RANGE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "kilometers": 14900}
+    },
+    {
+      "key": "OIL_SERVICE_TIME",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "days": 564}
+    },
+    {
+      "key": "INTERMEDIATE_SERVICE_RANGE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "kilometers": 14900}
+    },
+    {
+      "key": "INTERMEDIATE_SERVICE_TIME",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "days": 564}
+    },
+    {
+      "key": "LOCK_STATE_VEHICLE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:56:00Z", "isLocked": true}
+    },
+    {
+      "key": "OPEN_STATE_DOOR_FRONT_LEFT",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "isOpen": true}
+    },
+    {
+      "key": "OPEN_STATE_DOOR_FRONT_RIGHT",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "isOpen": false}
+    },
+    {
+      "key": "OPEN_STATE_LID_FRONT",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T11:55:00Z", "isOpen": false}
+    },
+    {
+      "key": "TIRE_PRESSURE",
+      "status": {"isEnabled": true},
+      "value": {
+        "lastModified": "2024-01-01T11:56:00Z",
+        "frontLeftTire": {"differenceBar": -0.2},
+        "rearLeftTire": {"differenceBar": -0.2},
+        "frontRightTire": {"differenceBar": -0.1},
+        "rearRightTire": {"differenceBar": -0.1}
+      }
+    },
+    {
+      "key": "PAIRING_CODE",
+      "status": {"isEnabled": true},
+      "value": {"lastModified": "2024-01-01T12:00:00Z", "code": "00000000"}
+    }
+  ]
+}
