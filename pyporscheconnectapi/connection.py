@@ -66,14 +66,17 @@ class Connection:
         password: str | None = None,
         captcha_code: str | None = None,
         state: str | None = None,
-        async_client=httpx.AsyncClient(),
+        async_client=None,
         token=None,
         leeway: int = 60,
     ) -> None:
         """Initialise the connection to the Porsche Connect API."""
         if token is None:
             token = {}
-        self.asyncClient = async_client
+        # Create a client lazily when none is supplied. A module-level default
+        # (httpx.AsyncClient()) would be evaluated once at import and shared by
+        # every Connection instance, breaking test isolation and CLI reuse.
+        self.asyncClient = async_client if async_client is not None else httpx.AsyncClient()
         self.token_lock = asyncio.Lock()
 
         self.token = OAuth2Token(token)
