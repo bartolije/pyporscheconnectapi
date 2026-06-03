@@ -10,6 +10,7 @@ import respx
 
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.const import API_BASE_URL
+from pyporscheconnectapi.exceptions import PorscheExceptionError
 from pyporscheconnectapi.vehicle import PorscheVehicle
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "vehicle_overview.json"
@@ -310,3 +311,24 @@ def test_tire_pressure_status_handles_empty(authed_connection: Connection):
         data={"TIRE_PRESSURE": {"frontLeftTire": {"differenceBar": -0.1}}},
     )
     assert v_ok.tire_pressure_status is True
+
+
+@pytest.mark.asyncio
+async def test_get_stored_overview_propagates_api_error(
+    authed_connection: Connection, api_routes,
+):
+    """get_stored_overview now re-raises PorscheExceptionError (no longer swallowed)."""
+    api_routes.get(url__regex=r"/connect/v1/vehicles/VINERR.*").mock(
+        return_value=httpx.Response(500, json={}),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, data={"vin": "VINERR"})
+    with pytest.raises(PorscheExceptionError):
+        await vehicle.get_stored_overview()
+
+
+def test_drivetrain_capabilities_missing_modeltype(authed_connection: Connection):
+    """has_* drivetrain helpers return False (no KeyError) when modelType is absent."""
+    v = PorscheVehicle(connection=authed_connection, data={})
+    assert v.has_electric_drivetrain is False
+    assert v.has_ice_drivetrain is False
+    assert v.has_direct_charge is False
