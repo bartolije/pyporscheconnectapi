@@ -14,6 +14,7 @@ from pyporscheconnectapi.const import (
 )
 from pyporscheconnectapi.exceptions import (
     PorscheCaptchaRequiredError,
+    PorscheExceptionError,
     PorscheWrongCredentialsError,
 )
 from pyporscheconnectapi.oauth2 import Captcha
@@ -225,3 +226,25 @@ async def test_captcha_retry_completes_login(connection: Connection, routes):
     assert identifier_route.call_count == 2
     last_body = identifier_route.calls[-1].request.content.decode()
     assert "captcha=ABC123" in last_body
+
+
+@pytest.mark.asyncio
+async def test_password_step_without_location_raises(
+    connection: Connection, routes,
+):
+    """A non-redirect password response (e.g. an MFA interstitial) raises a
+    clean PorscheExceptionError instead of KeyError-ing on a missing Location.
+    """
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(
+        return_value=httpx.Response(200),
+    )
+    # 200 with no Location header — not the expected redirect to a resume URL.
+    routes.post("/u/login/password").mock(
+        return_value=httpx.Response(200),
+    )
+
+    with pytest.raises(PorscheExceptionError):
+        await connection.get_token()

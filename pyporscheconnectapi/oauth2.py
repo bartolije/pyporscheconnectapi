@@ -35,6 +35,10 @@ from .exceptions import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Auth0 needs a brief settle time after the password POST before the resume
+# endpoint will mint the authorization code.
+_RESUME_DELAY = 2.5
+
 
 class Credentials(NamedTuple):
     """Store credentials for the Porsche Connect API."""
@@ -337,11 +341,16 @@ class OAuth2Client:
             msg = "Wrong credentials"
             raise PorscheWrongCredentialsError(msg)
 
-        resume_url = resp.headers["Location"]
+        # A successful password step replies with a 302 whose Location is the
+        # resume URL. Anything else (MFA interstitial, error page) has no
+        # Location header — surface it instead of KeyError-ing.
+        resume_url = resp.headers.get("Location")
+        if not resume_url:
+            msg = f"Unexpected password-step response (HTTP {resp.status_code}); no resume URL"
+            raise PorscheExceptionError(msg)
         _LOGGER.debug("Resume at %s:", resume_url)
 
-        _LOGGER.debug("Sleeping 2.5s...")
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(_RESUME_DELAY)
 
         return resume_url
 
