@@ -130,12 +130,12 @@ class PorscheVehicle:
         return self.data.get("CHARGING_SUMMARY", {}).get("mode") == "DIRECT"
 
     @property
-    def privacy_mode(self) -> bool:
+    def privacy_mode(self) -> bool | None:
         """Return True if privacy mode is on."""
         return self.data.get("GLOBAL_PRIVACY_MODE", {}).get("isEnabled")
 
     @property
-    def remote_climatise_on(self) -> bool:
+    def remote_climatise_on(self) -> bool | None:
         """Return True if remote climatisation is on."""
         _LOGGER.debug("Remote climatisation is: %s", self.data.get("CLIMATIZER_STATE", {}).get("isOn"))
 
@@ -156,7 +156,7 @@ class PorscheVehicle:
         )
 
     @property
-    def doors_and_lids(self) -> bool:
+    def doors_and_lids(self) -> dict:
         """Return list of all doors and lids and their status."""
         dl = [{key: "Open" if self.data[key]["isOpen"] is True else "Closed"} for key in self.data if key.startswith("OPEN_STATE_")]
         return dict(map(dict.popitem, dl))
@@ -177,7 +177,7 @@ class PorscheVehicle:
         return max(differences) <= TIRE_PRESSURE_TOLERANCE
 
     @property
-    def tire_pressures(self) -> bool:
+    def tire_pressures(self) -> dict | None:
         """Return a dict containing tire pressure readings."""
         return self.data.get("TIRE_PRESSURE")
 
@@ -187,12 +187,12 @@ class PorscheVehicle:
         return self.data.get("TIRE_PRESSURE") is not None
 
     @property
-    def charging_target(self) -> bool | None:
+    def charging_target(self) -> int | None:
         """Return target state of charge (SoC) for high voltage battery."""
         return self.data.get("CHARGING_SUMMARY", {}).get("minSoC")
 
     @property
-    def location_updated_at(self) -> datetime:
+    def location_updated_at(self) -> datetime.datetime | None:
         """Return time stamp of latest location update."""
         datetime_str = self.data.get("GPS_LOCATION", {}).get("lastModified")
         if datetime_str:
