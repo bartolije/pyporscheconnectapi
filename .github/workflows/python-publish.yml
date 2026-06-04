@@ -5,7 +5,7 @@ name: Upload Python Package
 
 on:
   release:
-    types: [created]
+    types: [published]
 
 jobs:
   deploy:
@@ -26,3 +26,7 @@ jobs:
         run: python -m build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A release cut for an already-published version is a no-op instead
+          # of a hard failure (e.g. when a version was uploaded manually).
+          skip-existing: true
