@@ -7,7 +7,10 @@ line-length = 160
 
 [tool.ruff.lint]
 select = [ "ALL" ]
-ignore = [ "ANN", "PLR2004", "PLR0912", "PLR0913", "TC001", "C901", "B008", "D203", "D213" ]
+# CPY and PLR0917 are preview rules in the pinned ruff but stabilised in newer
+# releases — ignored explicitly so bumping the pin doesn't break CI (the repo
+# uses SPDX headers, not per-file copyright notices; PLR0913 already ignored).
+ignore = [ "ANN", "CPY", "PLR2004", "PLR0912", "PLR0913", "PLR0917", "TC001", "C901", "B008", "D203", "D213" ]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/*.py" = [ "INP001", "T201" ]
