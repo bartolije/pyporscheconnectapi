@@ -1,6 +1,7 @@
 """OAuth2 flow tests against a respx-mocked Porsche identity server."""
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import httpx
@@ -248,3 +249,140 @@ async def test_password_step_without_location_raises(
 
     with pytest.raises(PorscheExceptionError):
         await connection.get_token()
+
+
+# -- Token endpoint retry (transient failures) ------------------------------
+
+
+@pytest.fixture
+def _instant_retry_sleep(monkeypatch):
+    """Make the retry backoff instant for transport-error tests."""
+    real_sleep = asyncio.sleep
+
+    async def _instant(_delay):
+        await real_sleep(0)
+
+    monkeypatch.setattr("pyporscheconnectapi.retry.asyncio.sleep", _instant)
+
+
+def _expired_token() -> dict:
+    return {
+        "access_token": "old.access.token",
+        "refresh_token": "old.refresh.token",
+        "expires_at": 1,
+        "token_type": "Bearer",
+    }
+
+
+@pytest.mark.asyncio
+async def test_fetch_access_token_retries_transient_503(
+    connection: Connection, routes,
+):
+    """A transient 503 on the code→token exchange is retried, not fatal."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(503, headers={"Retry-After": "0"}),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_retries_on_429(email: str, password: str, routes):
+    """A rate-limited refresh is retried instead of bubbling up an error."""
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client, token=_expired_token(),
+        )
+        await conn.get_token()
+
+    assert conn.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+    # The refresh path must not have fallen back to a full re-login.
+    assert not any(call.request.url.path == "/authorize" for call in routes.calls)
+
+
+@pytest.mark.asyncio
+async def test_fetch_access_token_gives_up_after_retries(
+    connection: Connection, routes,
+):
+    """A persistent 503 on the token endpoint fails after the retry budget."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        return_value=httpx.Response(503, headers={"Retry-After": "0"}),
+    )
+
+    with pytest.raises(PorscheExceptionError) as exc_info:
+        await connection.get_token()
+
+    assert exc_info.value.code == 503
+    assert token_route.call_count == 4  # initial + 3 retries
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_403_is_not_retried(email: str, password: str, routes):
+    """Regression: a 403 (invalid refresh token) is NOT transient — it must
+    trigger the full re-login exactly as before, without extra token POSTs.
+    """
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(403),  # refresh rejected → full login
+            httpx.Response(200, json=TOKEN_PAYLOAD),  # code→token exchange
+        ],
+    )
+
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client, token=_expired_token(),
+        )
+        await conn.get_token()
+
+    assert conn.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_instant_retry_sleep")
+async def test_token_endpoint_retries_transport_error(
+    connection: Connection, routes,
+):
+    """A network hiccup on the token endpoint is retried with backoff."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.ConnectError("boom"),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2

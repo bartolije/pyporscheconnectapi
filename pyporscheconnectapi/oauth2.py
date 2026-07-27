@@ -9,6 +9,7 @@ import logging
 import re
 import secrets
 import time
+from functools import partial
 from typing import NamedTuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -32,6 +33,7 @@ from .exceptions import (
     PorscheExceptionError,
     PorscheWrongCredentialsError,
 )
+from .retry import send_with_retries
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -370,11 +372,9 @@ class OAuth2Client:
         try:
             _LOGGER.debug("Exchanging the authorization code for an access token.")
 
-            resp = await self.client.post(
-                TOKEN_URL,
-                data=data,
-                timeout=TIMEOUT,
-                headers=self.headers,
+            resp = await send_with_retries(
+                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+                description="token endpoint (authorization_code)",
             )
             resp.raise_for_status()
             return resp.json()
@@ -395,11 +395,9 @@ class OAuth2Client:
         try:
             _LOGGER.debug("Using the refresh token to get a new access token.")
 
-            resp = await self.client.post(
-                TOKEN_URL,
-                data=data,
-                timeout=TIMEOUT,
-                headers=self.headers,
+            resp = await send_with_retries(
+                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+                description="token endpoint (refresh_token)",
             )
             resp.raise_for_status()
             return resp.json()
