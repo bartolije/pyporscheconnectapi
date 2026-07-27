@@ -386,3 +386,68 @@ async def test_token_endpoint_retries_transport_error(
 
     assert connection.token["access_token"] == "fake.access.token"
     assert token_route.call_count == 2
+
+
+# -- Resume polling (replaces the fixed 2.5s settle delay) ------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_polls_until_code_is_ready(
+    connection: Connection, routes, monkeypatch,
+):
+    """Auth0 not ready on the first resume attempts → poll until the 302."""
+    monkeypatch.setattr(
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0, 0.0),
+    )
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    resume_route = routes.get("/authorize/resume")
+    resume_route.mock(
+        side_effect=[
+            httpx.Response(200),  # not ready: no redirect yet
+            httpx.Response(200),
+            _redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+        ],
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert resume_route.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_resume_without_code_raises_explicit_error(
+    connection: Connection, routes, monkeypatch,
+):
+    """The resume never yields a code → explicit error, not a silent None."""
+    monkeypatch.setattr(
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0),
+    )
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    resume_route = routes.get("/authorize/resume")
+    # A 302 without a code parameter — the resume "succeeds" but never
+    # delivers what we came for.
+    resume_route.mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+
+    with pytest.raises(PorscheExceptionError) as exc_info:
+        await connection.get_token()
+
+    assert "no authorization code" in exc_info.value.message
+    assert resume_route.call_count == 2
