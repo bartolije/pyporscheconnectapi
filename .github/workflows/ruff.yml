@@ -6,3 +6,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/ruff-action@v1
+        with:
+          # Pinned to the local dev toolchain: an unpinned action pulls the
+          # newest ruff, whose freshly-stabilised rules break CI out of the
+          # blue (select ALL). Bump together with the local venv.
+          version: 0.15.15
