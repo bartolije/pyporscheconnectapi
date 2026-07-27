@@ -451,3 +451,97 @@ async def test_resume_without_code_raises_explicit_error(
 
     assert "no authorization code" in exc_info.value.message
     assert resume_route.call_count == 2
+
+
+# -- Multi-process captcha resume (serialised Auth0 session) ----------------
+
+
+@pytest.mark.asyncio
+async def test_captcha_error_carries_cookies(connection: Connection, routes):
+    """The captcha error must embed the Auth0 transaction cookies."""
+    routes.get("/authorize").mock(
+        return_value=httpx.Response(
+            302,
+            headers=[
+                ("Location", f"{REDIRECT_URI}?state=ST"),
+                ("Set-Cookie", "auth0=tx123; Path=/; Secure; HttpOnly"),
+            ],
+        ),
+    )
+    routes.post("/u/login/identifier").mock(
+        return_value=httpx.Response(400, text=SAMPLE_HTML_WITH_CAPTCHA),
+    )
+
+    with pytest.raises(PorscheCaptchaRequiredError) as exc_info:
+        await connection.get_token()
+
+    err = exc_info.value
+    assert err.cookies is not None
+    auth0_cookie = next(c for c in err.cookies if c["name"] == "auth0")
+    assert auth0_cookie["value"] == "tx123"
+    assert auth0_cookie["domain"] == "identity.porsche.com"
+    assert auth0_cookie["secure"] is True
+    # The session secret must not leak into Exception.args (→ logs).
+    assert all("tx123" not in str(arg) for arg in err.args)
+
+
+@pytest.mark.asyncio
+async def test_captcha_resume_in_fresh_client(email: str, password: str, routes):
+    """THE multi-process scenario: process 1 hits the captcha, process 2
+    resumes it with a brand-new httpx client seeded from err.cookies/state.
+    """
+    routes.get("/authorize").mock(
+        return_value=httpx.Response(
+            302,
+            headers=[
+                ("Location", f"{REDIRECT_URI}?state=ST"),
+                ("Set-Cookie", "auth0=tx123; Path=/; Secure; HttpOnly"),
+            ],
+        ),
+    )
+    identifier_route = routes.post("/u/login/identifier")
+    identifier_route.mock(
+        side_effect=[
+            httpx.Response(400, text=SAMPLE_HTML_WITH_CAPTCHA),  # process 1
+            httpx.Response(200),  # process 2, captcha code supplied
+        ],
+    )
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    routes.get("/authorize/resume").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    # Process 1: the captcha challenge interrupts the login.
+    async with httpx.AsyncClient() as client_one:
+        conn_one = Connection(email=email, password=password, async_client=client_one)
+        with pytest.raises(PorscheCaptchaRequiredError) as exc_info:
+            await conn_one.get_token()
+    err = exc_info.value
+
+    # Process 2: a FRESH client — only captcha_code/state/cookies carry over.
+    async with httpx.AsyncClient() as client_two:
+        conn_two = Connection(
+            email=email,
+            password=password,
+            captcha_code="ABC123",
+            state=err.state,
+            async_client=client_two,
+            cookies=err.cookies,
+        )
+        await conn_two.get_token()
+
+    assert conn_two.token["access_token"] == "fake.access.token"
+
+    # The resumed flow reused the Auth0 transaction: /authorize was hit only
+    # once (by process 1), and the identifier POST carried the session cookie.
+    authorize_calls = [c for c in routes.calls if c.request.url.path == "/authorize"]
+    assert len(authorize_calls) == 1
+    assert identifier_route.call_count == 2
+    resumed_request = identifier_route.calls[-1].request
+    assert "auth0=tx123" in resumed_request.headers.get("Cookie", "")
+    assert "captcha=ABC123" in resumed_request.content.decode()

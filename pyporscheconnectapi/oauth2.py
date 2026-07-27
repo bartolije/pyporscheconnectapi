@@ -28,6 +28,7 @@ from .const import (
     USER_AGENT,
     X_CLIENT_ID,
 )
+from .cookies import serialize_cookies
 from .exceptions import (
     PorscheCaptchaRequiredError,
     PorscheExceptionError,
@@ -338,7 +339,11 @@ class OAuth2Client:
                 raise PorscheExceptionError(msg)
 
             _LOGGER.debug("Parsed captcha image: %s...", str(captcha_img)[:100])
-            raise PorscheCaptchaRequiredError(captcha=captcha_img, state=state)
+            raise PorscheCaptchaRequiredError(
+                captcha=captcha_img,
+                state=state,
+                cookies=serialize_cookies(self.client.cookies),
+            )
 
         # 2. /u/login/password w/ password
 

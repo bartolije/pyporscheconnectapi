@@ -9,6 +9,7 @@ import logging
 import httpx
 
 from .const import API_BASE_URL, TIMEOUT, USER_AGENT, X_CLIENT_ID
+from .cookies import deserialize_cookies
 from .exceptions import PorscheExceptionError
 from .oauth2 import Captcha, Credentials, OAuth2Client, OAuth2Token
 from .retry import send_with_retries
@@ -33,6 +34,8 @@ class Connection:
     :param asyncClient: httpx.AsyncClient or None
     :param token: token dict - should be a dict with access_token, refresh_token, expires_at, etc as root params
     :param leeway: time in seconds to consider token as expired before it actually expires
+    :param cookies: serialised Auth0 session (PorscheCaptchaRequiredError.cookies)
+        to resume a captcha challenge from another process
     """
 
     def __init__(
@@ -44,6 +47,7 @@ class Connection:
         async_client=None,
         token=None,
         leeway: int = 60,
+        cookies: list[dict] | None = None,
     ) -> None:
         """Initialise the connection to the Porsche Connect API."""
         if token is None:
@@ -52,6 +56,11 @@ class Connection:
         # (httpx.AsyncClient()) would be evaluated once at import and shared by
         # every Connection instance, breaking test isolation and CLI reuse.
         self.asyncClient = async_client if async_client is not None else httpx.AsyncClient()
+        if cookies:
+            # Restore the Auth0 transaction (PorscheCaptchaRequiredError.cookies)
+            # so the captcha retry can resume the Identifier First flow started
+            # by another process.
+            deserialize_cookies(self.asyncClient.cookies, cookies)
         self.token_lock = asyncio.Lock()
 
         self.token = OAuth2Token(token)
