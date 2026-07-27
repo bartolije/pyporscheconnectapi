@@ -1,6 +1,7 @@
 """OAuth2 flow tests against a respx-mocked Porsche identity server."""
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import httpx
@@ -248,3 +249,299 @@ async def test_password_step_without_location_raises(
 
     with pytest.raises(PorscheExceptionError):
         await connection.get_token()
+
+
+# -- Token endpoint retry (transient failures) ------------------------------
+
+
+@pytest.fixture
+def _instant_retry_sleep(monkeypatch):
+    """Make the retry backoff instant for transport-error tests."""
+    real_sleep = asyncio.sleep
+
+    async def _instant(_delay):
+        await real_sleep(0)
+
+    monkeypatch.setattr("pyporscheconnectapi.retry.asyncio.sleep", _instant)
+
+
+def _expired_token() -> dict:
+    return {
+        "access_token": "old.access.token",
+        "refresh_token": "old.refresh.token",
+        "expires_at": 1,
+        "token_type": "Bearer",
+    }
+
+
+@pytest.mark.asyncio
+async def test_fetch_access_token_retries_transient_503(
+    connection: Connection, routes,
+):
+    """A transient 503 on the code→token exchange is retried, not fatal."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(503, headers={"Retry-After": "0"}),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_retries_on_429(email: str, password: str, routes):
+    """A rate-limited refresh is retried instead of bubbling up an error."""
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client, token=_expired_token(),
+        )
+        await conn.get_token()
+
+    assert conn.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+    # The refresh path must not have fallen back to a full re-login.
+    assert not any(call.request.url.path == "/authorize" for call in routes.calls)
+
+
+@pytest.mark.asyncio
+async def test_fetch_access_token_gives_up_after_retries(
+    connection: Connection, routes,
+):
+    """A persistent 503 on the token endpoint fails after the retry budget."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        return_value=httpx.Response(503, headers={"Retry-After": "0"}),
+    )
+
+    with pytest.raises(PorscheExceptionError) as exc_info:
+        await connection.get_token()
+
+    assert exc_info.value.code == 503
+    assert token_route.call_count == 4  # initial + 3 retries
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_403_is_not_retried(email: str, password: str, routes):
+    """Regression: a 403 (invalid refresh token) is NOT transient — it must
+    trigger the full re-login exactly as before, without extra token POSTs.
+    """
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.Response(403),  # refresh rejected → full login
+            httpx.Response(200, json=TOKEN_PAYLOAD),  # code→token exchange
+        ],
+    )
+
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client, token=_expired_token(),
+        )
+        await conn.get_token()
+
+    assert conn.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_instant_retry_sleep")
+async def test_token_endpoint_retries_transport_error(
+    connection: Connection, routes,
+):
+    """A network hiccup on the token endpoint is retried with backoff."""
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(
+        side_effect=[
+            httpx.ConnectError("boom"),
+            httpx.Response(200, json=TOKEN_PAYLOAD),
+        ],
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert token_route.call_count == 2
+
+
+# -- Resume polling (replaces the fixed 2.5s settle delay) ------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_polls_until_code_is_ready(
+    connection: Connection, routes, monkeypatch,
+):
+    """Auth0 not ready on the first resume attempts → poll until the 302."""
+    monkeypatch.setattr(
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0, 0.0),
+    )
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    resume_route = routes.get("/authorize/resume")
+    resume_route.mock(
+        side_effect=[
+            httpx.Response(200),  # not ready: no redirect yet
+            httpx.Response(200),
+            _redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+        ],
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    assert resume_route.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_resume_without_code_raises_explicit_error(
+    connection: Connection, routes, monkeypatch,
+):
+    """The resume never yields a code → explicit error, not a silent None."""
+    monkeypatch.setattr(
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0),
+    )
+    routes.get("/authorize").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    resume_route = routes.get("/authorize/resume")
+    # A 302 without a code parameter — the resume "succeeds" but never
+    # delivers what we came for.
+    resume_route.mock(
+        return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
+    )
+
+    with pytest.raises(PorscheExceptionError) as exc_info:
+        await connection.get_token()
+
+    assert "no authorization code" in exc_info.value.message
+    assert resume_route.call_count == 2
+
+
+# -- Multi-process captcha resume (serialised Auth0 session) ----------------
+
+
+@pytest.mark.asyncio
+async def test_captcha_error_carries_cookies(connection: Connection, routes):
+    """The captcha error must embed the Auth0 transaction cookies."""
+    routes.get("/authorize").mock(
+        return_value=httpx.Response(
+            302,
+            headers=[
+                ("Location", f"{REDIRECT_URI}?state=ST"),
+                ("Set-Cookie", "auth0=tx123; Path=/; Secure; HttpOnly"),
+            ],
+        ),
+    )
+    routes.post("/u/login/identifier").mock(
+        return_value=httpx.Response(400, text=SAMPLE_HTML_WITH_CAPTCHA),
+    )
+
+    with pytest.raises(PorscheCaptchaRequiredError) as exc_info:
+        await connection.get_token()
+
+    err = exc_info.value
+    assert err.cookies is not None
+    auth0_cookie = next(c for c in err.cookies if c["name"] == "auth0")
+    assert auth0_cookie["value"] == "tx123"
+    assert auth0_cookie["domain"] == "identity.porsche.com"
+    assert auth0_cookie["secure"] is True
+    # The session secret must not leak into Exception.args (→ logs).
+    assert all("tx123" not in str(arg) for arg in err.args)
+
+
+@pytest.mark.asyncio
+async def test_captcha_resume_in_fresh_client(email: str, password: str, routes):
+    """THE multi-process scenario: process 1 hits the captcha, process 2
+    resumes it with a brand-new httpx client seeded from err.cookies/state.
+    """
+    routes.get("/authorize").mock(
+        return_value=httpx.Response(
+            302,
+            headers=[
+                ("Location", f"{REDIRECT_URI}?state=ST"),
+                ("Set-Cookie", "auth0=tx123; Path=/; Secure; HttpOnly"),
+            ],
+        ),
+    )
+    identifier_route = routes.post("/u/login/identifier")
+    identifier_route.mock(
+        side_effect=[
+            httpx.Response(400, text=SAMPLE_HTML_WITH_CAPTCHA),  # process 1
+            httpx.Response(200),  # process 2, captcha code supplied
+        ],
+    )
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    routes.get("/authorize/resume").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    # Process 1: the captcha challenge interrupts the login.
+    async with httpx.AsyncClient() as client_one:
+        conn_one = Connection(email=email, password=password, async_client=client_one)
+        with pytest.raises(PorscheCaptchaRequiredError) as exc_info:
+            await conn_one.get_token()
+    err = exc_info.value
+
+    # Process 2: a FRESH client — only captcha_code/state/cookies carry over.
+    async with httpx.AsyncClient() as client_two:
+        conn_two = Connection(
+            email=email,
+            password=password,
+            captcha_code="ABC123",
+            state=err.state,
+            async_client=client_two,
+            cookies=err.cookies,
+        )
+        await conn_two.get_token()
+
+    assert conn_two.token["access_token"] == "fake.access.token"
+
+    # The resumed flow reused the Auth0 transaction: /authorize was hit only
+    # once (by process 1), and the identifier POST carried the session cookie.
+    authorize_calls = [c for c in routes.calls if c.request.url.path == "/authorize"]
+    assert len(authorize_calls) == 1
+    assert identifier_route.call_count == 2
+    resumed_request = identifier_route.calls[-1].request
+    assert "auth0=tx123" in resumed_request.headers.get("Cookie", "")
+    assert "captcha=ABC123" in resumed_request.content.decode()

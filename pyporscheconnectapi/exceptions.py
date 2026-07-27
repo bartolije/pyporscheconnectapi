@@ -1,7 +1,10 @@
 #  SPDX-License-Identifier: Apache-2.0
 """Exceptions used for Porsche Connect API."""
 
+from __future__ import annotations
+
 import logging
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,8 +54,9 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
 
     captcha: str | None = None
     state: str | None = None
+    cookies: list[dict[str, Any]] | None = None
 
-    def __init__(self, captcha=None, state=None):
+    def __init__(self, captcha=None, state=None, cookies=None):
         """Initialize the captcha exception."""
         if captcha is not None and state is not None:
             # Don't log the captcha payload itself — it's a ~14 KB base64
@@ -64,6 +68,11 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
             )
             self.captcha = captcha
             self.state = state
+
+        # The serialised Auth0 session, so a NEW process can resume the
+        # captcha challenge: Connection(..., captcha_code=, state=, cookies=).
+        # Session secret: kept OUT of Exception.args (args end up in logs).
+        self.cookies = cookies
 
         super().__init__(captcha, state)
 

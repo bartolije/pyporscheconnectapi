@@ -270,19 +270,18 @@ async def main(args):
             response = controller.token
         else:
             vehicles = await get_vehicles_with_captcha_retry(controller, connection)
-            vins = (v.vin for v in vehicles)
-            if vins is None:
+            if not vehicles:
                 printc("No vehicles found.")
 
-        if args.command == "list":
-            for vehicle in vehicles:
-                response = response | vehicle.data
-        elif args.vin is not None:
-            vehicle = await controller.get_vehicle(args.vin)
-            if vehicle is not None:
-                response = await globals()[args.func](vehicle, args)
-        else:
-            sys.exit("--vin or --all is required")
+            if args.command == "list":
+                for vehicle in vehicles:
+                    response = response | vehicle.data
+            elif args.vin is not None:
+                vehicle = await controller.get_vehicle(args.vin)
+                if vehicle is not None:
+                    response = await globals()[args.func](vehicle, args)
+            else:
+                sys.exit("--vin or --all is required")
     except PorscheWrongCredentialsError as e:
         sys.exit(e.message)
     else:

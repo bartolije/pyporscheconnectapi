@@ -9,6 +9,7 @@ import logging
 import re
 import secrets
 import time
+from functools import partial
 from typing import NamedTuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -27,17 +28,20 @@ from .const import (
     USER_AGENT,
     X_CLIENT_ID,
 )
+from .cookies import serialize_cookies
 from .exceptions import (
     PorscheCaptchaRequiredError,
     PorscheExceptionError,
     PorscheWrongCredentialsError,
 )
+from .retry import send_with_retries
 
 _LOGGER = logging.getLogger(__name__)
 
 # Auth0 needs a brief settle time after the password POST before the resume
-# endpoint will mint the authorization code.
-_RESUME_DELAY = 2.5
+# endpoint will mint the authorization code. Poll immediately, then back off —
+# a fixed sleep penalised every login even when Auth0 was already ready.
+_RESUME_POLL_DELAYS = (0.0, 0.5, 1.0, 2.0, 2.5)
 
 
 class Credentials(NamedTuple):
@@ -181,16 +185,38 @@ class OAuth2Client:
                 state = params["state"][0]
 
             resume_path = await self.login_with_identifier(state)
-            params = await self.get_and_extract_location_params(
+            authorization_code = await self._poll_resume_for_code(
                 urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
             )
-            authorization_code = params.get("code", [None])[0]
 
         except httpx.HTTPStatusError as exc:
             raise PorscheExceptionError(exc.response.status_code) from exc
 
         _LOGGER.debug("Authorization code: %s", authorization_code)
         return authorization_code
+
+    async def _poll_resume_for_code(self, resume_url: str) -> str:
+        """Poll the resume endpoint until Auth0 mints the authorization code.
+
+        Ends the wait as soon as the code is available instead of always
+        paying a fixed settle delay, and surfaces an explicit error when
+        the code never shows up (previously a silent None that blew up
+        later in the code→token exchange with a misleading message).
+        """
+        last_error: PorscheExceptionError | None = None
+        for attempt, delay in enumerate(_RESUME_POLL_DELAYS):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                params = await self.get_and_extract_location_params(resume_url)
+            except PorscheExceptionError as exc:  # non-302: Auth0 not ready yet
+                last_error = exc
+                continue
+            if (code := params.get("code", [None])[0]) is not None:
+                return code
+            _LOGGER.debug("Resume attempt %d returned no authorization code yet.", attempt + 1)
+        msg = f"Auth0 resume returned no authorization code after {len(_RESUME_POLL_DELAYS)} attempts"
+        raise PorscheExceptionError(msg) from last_error
 
     async def get_and_extract_location_params(self, url, params=None):
         """GET the URL and extract the params from the Location header.
@@ -313,7 +339,11 @@ class OAuth2Client:
                 raise PorscheExceptionError(msg)
 
             _LOGGER.debug("Parsed captcha image: %s...", str(captcha_img)[:100])
-            raise PorscheCaptchaRequiredError(captcha=captcha_img, state=state)
+            raise PorscheCaptchaRequiredError(
+                captcha=captcha_img,
+                state=state,
+                cookies=serialize_cookies(self.client.cookies),
+            )
 
         # 2. /u/login/password w/ password
 
@@ -350,8 +380,6 @@ class OAuth2Client:
             raise PorscheExceptionError(msg)
         _LOGGER.debug("Resume at %s:", resume_url)
 
-        await asyncio.sleep(_RESUME_DELAY)
-
         return resume_url
 
     async def fetch_access_token(self, authorization_code):
@@ -370,11 +398,9 @@ class OAuth2Client:
         try:
             _LOGGER.debug("Exchanging the authorization code for an access token.")
 
-            resp = await self.client.post(
-                TOKEN_URL,
-                data=data,
-                timeout=TIMEOUT,
-                headers=self.headers,
+            resp = await send_with_retries(
+                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+                description="token endpoint (authorization_code)",
             )
             resp.raise_for_status()
             return resp.json()
@@ -395,11 +421,9 @@ class OAuth2Client:
         try:
             _LOGGER.debug("Using the refresh token to get a new access token.")
 
-            resp = await self.client.post(
-                TOKEN_URL,
-                data=data,
-                timeout=TIMEOUT,
-                headers=self.headers,
+            resp = await send_with_retries(
+                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+                description="token endpoint (refresh_token)",
             )
             resp.raise_for_status()
             return resp.json()

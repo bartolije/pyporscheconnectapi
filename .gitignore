@@ -136,3 +136,4 @@ dmypy.json
 
 # Local API exploration dumps (contain VIN, GPS, pairing code…)
 examples/_explore_out/
+.DS_Store
