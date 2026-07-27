@@ -101,3 +101,36 @@ Install pyporscheconnectapi using pip (requires python >= 3.10)
 ### Example client usage
 
 Please refer to the examples provided in the repository.
+
+### Resuming a captcha challenge from another process
+
+Auth0 sometimes requires a captcha during login. The challenge is bound to
+the session cookies of the HTTP client that started it — since 0.4.0 the
+`PorscheCaptchaRequiredError` carries everything needed to resume the login
+elsewhere (another process, after a restart, ...):
+
+```python
+from pyporscheconnectapi.connection import Connection
+from pyporscheconnectapi.exceptions import PorscheCaptchaRequiredError
+
+try:
+    connection = Connection(email, password)
+    await connection.get_token()
+except PorscheCaptchaRequiredError as err:
+    persist(err.captcha, err.state, err.cookies)  # cookies is JSON-compatible
+
+# ... later, in a fresh process, once the captcha is solved:
+connection = Connection(
+    email, password,
+    captcha_code=solved_code, state=state, cookies=cookies,
+)
+await connection.get_token()
+```
+
+Treat `err.cookies` like a password: it is the Auth0 session secret.
+
+### Transient error handling
+
+Requests to the Porsche API — including the OAuth2 token endpoints — retry
+transparently on transient failures (HTTP 429/502/503/504 and network
+errors) with capped exponential backoff, honouring `Retry-After`.
