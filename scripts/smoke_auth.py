@@ -55,10 +55,16 @@ def load_credentials() -> tuple[str, str]:
             f"{CFG} not found.\n"
             f"Copy .porscheconnect.cfg.example to {CFG} and fill in your credentials.",
         )
-    cfg = configparser.ConfigParser()
-    cfg.read(CFG)
-    email = cfg.get("porsche", "email", fallback="")
-    password = cfg.get("porsche", "password", fallback="")
+    # interpolation=None: a '%' in the password is a literal, not syntax.
+    cfg = configparser.ConfigParser(interpolation=None)
+    try:
+        cfg.read(CFG)
+        email = cfg.get("porsche", "email", fallback="")
+        password = cfg.get("porsche", "password", fallback="")
+    except configparser.Error as exc:
+        # Deliberately not echoing exc: configparser puts the offending
+        # value (i.e. the password) straight into its message.
+        sys.exit(f"Could not parse {CFG}: {type(exc).__name__}. Check the [porsche] section.")
     if not email or not password:
         sys.exit(f"{CFG} is missing 'email' or 'password' under [porsche].")
     return email, password

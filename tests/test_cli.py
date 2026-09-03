@@ -205,3 +205,31 @@ def test_cli_parses_command_into_main_args(tmp_path, monkeypatch):
     assert args.func == "battery"
     assert args.vin == "WP0TEST"
     assert args.json is True
+
+
+def test_cli_reads_password_containing_percent(tmp_path, monkeypatch):
+    """A '%' in the password is a literal, not configparser interpolation.
+
+    The default ConfigParser uses BasicInterpolation, which raises
+    InterpolationSyntaxError on a bare '%' - and echoes the offending
+    fragment (the password) into the traceback. Passwords routinely
+    contain '%', so the config must be read with interpolation disabled.
+    """
+    monkeypatch.chdir(tmp_path)
+    password = "100%-not-a-real-password"
+    (tmp_path / ".porscheconnect.cfg").write_text(
+        f"[porsche]\nemail = user@example.com\npassword = {password}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["porschecli", "-j", "battery", "-v", "WP0TEST"])
+    captured = {}
+
+    async def fake_main(args):
+        captured["args"] = args
+
+    monkeypatch.setattr(cli, "main", fake_main)
+
+    cli.cli()
+
+    assert captured["args"].password == password
+    assert captured["args"].email == "user@example.com"

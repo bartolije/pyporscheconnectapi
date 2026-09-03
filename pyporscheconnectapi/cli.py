@@ -312,7 +312,10 @@ def add_arg_vin(parser):
 
 def cli():
     """Get configuration parameters and command line arguments and run main loop."""
-    config = configparser.ConfigParser()
+    # interpolation=None: passwords routinely contain '%', which the default
+    # BasicInterpolation treats as syntax and dies on (InterpolationSyntaxError,
+    # with the offending fragment echoed into the traceback).
+    config = configparser.ConfigParser(interpolation=None)
     config["porsche"] = {
         "email": "",
         "password": "",
