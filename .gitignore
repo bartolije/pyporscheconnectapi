@@ -141,3 +141,4 @@ examples/_explore_out/
 # Local Porsche Connect credentials + artefacts (never commit)
 .porscheconnect.cfg
 porsche_captcha.html
+.captcha_resume.json
