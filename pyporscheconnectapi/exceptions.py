@@ -54,6 +54,18 @@ class PorscheWrongCredentialsError(PorscheExceptionError):
     """Class of exceptions for incomplete credentials."""
 
 
+class PorscheLoginThrottledError(PorscheWrongCredentialsError):
+    """Auth0 refused the login because it is throttled or the account is blocked.
+
+    Auth0 returns the same HTTP 400 for a wrong password and for a rate-limited
+    or blocked account, so the two are only distinguishable by the wording of
+    the returned page. Subclasses PorscheWrongCredentialsError on purpose:
+    existing ``except PorscheWrongCredentialsError`` handlers keep catching it,
+    while callers that care can catch this first and back off instead of
+    prompting the user to re-enter a password that is actually correct.
+    """
+
+
 class PorscheCaptchaRequiredError(PorscheExceptionError):
     """Class of exception when captcha verification is required."""
 

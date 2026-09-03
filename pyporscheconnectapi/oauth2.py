@@ -33,11 +33,19 @@ from .cookies import serialize_cookies
 from .exceptions import (
     PorscheCaptchaRequiredError,
     PorscheExceptionError,
+    PorscheLoginThrottledError,
     PorscheWrongCredentialsError,
 )
 from .retry import send_with_retries
 
 _LOGGER = logging.getLogger(__name__)
+
+# Wording Auth0 uses when it refuses a login for reasons other than a bad
+# password: rate limiting, brute-force protection, or a blocked account.
+_THROTTLE_PATTERN = re.compile(
+    r"too many|blocked|rate.?limit|try again later|suspicious|temporarily",
+    re.IGNORECASE,
+)
 
 # Auth0 needs a brief settle time after the password POST before the resume
 # endpoint will mint the authorization code. Poll immediately, then back off —
@@ -283,6 +291,29 @@ class OAuth2Client:
         new_query.update(params)
         return new_query
 
+    def _extract_auth0_error(self, html: str) -> str | None:
+        """Pull the human-readable failure reason out of an Auth0 error page.
+
+        Auth0's Universal Login answers a wrong password, a throttled login
+        and a blocked account all with HTTP 400 and an HTML body -- there is
+        no JSON error code to switch on. The reason is rendered into the page,
+        so surfacing it is the only way for a caller to tell "you typed the
+        wrong password" apart from "you are being rate limited".
+        """
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception:  # noqa: BLE001 - a parser failure must never mask the auth error
+            return None
+        candidates = (
+            soup.find(attrs={"role": "alert"}),
+            soup.find(class_=re.compile(r"ulp-error|error-info|error-message")),
+            soup.find(id=re.compile(r"^error-element-")),
+        )
+        for element in candidates:
+            if element is not None and (text := element.get_text(" ", strip=True)):
+                return text[:200]
+        return None
+
     def _extract_captcha_image(self, html: str):
         """Extract the captcha image from Auth0 ACUL or legacy login HTML."""
         script_match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
@@ -457,7 +488,12 @@ class OAuth2Client:
         )
 
         if resp.status_code == 401:
-            msg = "Wrong credentials"
+            reason = self._extract_auth0_error(resp.text)
+            _LOGGER.debug("Identifier step rejected: %s", reason or "(no reason in response)")
+            if reason and _THROTTLE_PATTERN.search(reason):
+                msg = f"Login throttled by Auth0 ({reason})"
+                raise PorscheLoginThrottledError(msg)
+            msg = f"Wrong credentials ({reason})" if reason else "Wrong credentials"
             raise PorscheWrongCredentialsError(msg)
 
         # In case captcha verification is required, the response code is 400 and the captcha is provided as a svg image
@@ -465,6 +501,13 @@ class OAuth2Client:
             _LOGGER.debug("Captcha required.")
             captcha_img = self._extract_captcha_image(resp.text)
             if not captcha_img:
+                # A 400 with no captcha in it is usually not a captcha at all:
+                # Auth0 answers throttled and blocked logins the same way.
+                reason = self._extract_auth0_error(resp.text)
+                if reason:
+                    _LOGGER.error("Identifier step refused by Auth0: %s", reason)
+                    msg = f"Login refused by Auth0: {reason}"
+                    raise PorscheExceptionError(msg)
                 _LOGGER.error("Could not find captcha in response. HTML: %s", resp.text[:2000])
                 msg = "Captcha required but could not parse captcha image"
                 raise PorscheExceptionError(msg)
@@ -497,10 +540,15 @@ class OAuth2Client:
             headers=self.headers,
         )
 
-        # In case of wrong password, the response code is 400 (Bad request)
+        # Auth0 answers a wrong password, a throttled login and a blocked
+        # account all with 400, so the page's own wording is the only signal.
         if resp.status_code == 400:
-            _LOGGER.debug("Invalid credentials.")
-            msg = "Wrong credentials"
+            reason = self._extract_auth0_error(resp.text)
+            _LOGGER.debug("Password step rejected: %s", reason or "(no reason in response)")
+            if reason and _THROTTLE_PATTERN.search(reason):
+                msg = f"Login throttled by Auth0 ({reason})"
+                raise PorscheLoginThrottledError(msg)
+            msg = f"Wrong credentials ({reason})" if reason else "Wrong credentials"
             raise PorscheWrongCredentialsError(msg)
 
         # A successful password step replies with a 302 whose Location is the

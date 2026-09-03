@@ -90,7 +90,13 @@ async def authenticate(email: str, password: str) -> Connection:
                 print(f"{KO} exception carried no code_verifier — PKCE resume would fail")
                 raise
             print(f"{OK}exception carries state, cookies and code_verifier")
-            code = await asyncio.to_thread(input, "  CAPTCHA code: ")
+            try:
+                code = await asyncio.to_thread(input, "  CAPTCHA code: ")
+            except EOFError:
+                sys.exit(
+                    "  No terminal to read the captcha code from.\n"
+                    "  Re-run this script interactively (not piped, not with stdin closed).",
+                )
             code = code.strip()
 
             # A brand-new client on purpose: this is the fresh-process resume.

@@ -16,6 +16,7 @@ from pyporscheconnectapi.const import (
 from pyporscheconnectapi.exceptions import (
     PorscheCaptchaRequiredError,
     PorscheExceptionError,
+    PorscheLoginThrottledError,
     PorscheWrongCredentialsError,
 )
 from pyporscheconnectapi.oauth2 import Captcha
@@ -548,3 +549,54 @@ async def test_captcha_resume_in_fresh_client(email: str, password: str, routes)
     resumed_request = identifier_route.calls[-1].request
     assert "auth0=tx123" in resumed_request.headers.get("Cookie", "")
     assert "captcha=ABC123" in resumed_request.content.decode()
+
+
+# Auth0 renders the refusal reason into the returned HTML; a wrong password,
+# a throttled login and a blocked account all come back as HTTP 400.
+WRONG_PASSWORD_HTML = (
+    '<html><body><span id="error-element-password">'
+    "Wrong email or password.</span></body></html>"
+)
+THROTTLED_HTML = (
+    '<html><body><div role="alert">Your account has been blocked after '
+    "multiple consecutive login attempts.</div></body></html>"
+)
+
+
+async def _password_step_response(connection: Connection, routes, html: str):
+    """Drive the flow to the password step and return whatever it raises."""
+    routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=httpx.Response(400, text=html),
+    )
+    with pytest.raises(PorscheWrongCredentialsError) as exc_info:
+        await connection.get_token()
+    return exc_info.value
+
+
+@pytest.mark.asyncio
+async def test_wrong_password_surfaces_auth0_reason(connection: Connection, routes):
+    """A bad password keeps its exception type but now says why."""
+    err = await _password_step_response(connection, routes, WRONG_PASSWORD_HTML)
+    assert not isinstance(err, PorscheLoginThrottledError)
+    assert "Wrong email or password" in err.message
+
+
+@pytest.mark.asyncio
+async def test_throttled_login_is_distinguishable(connection: Connection, routes):
+    """A rate-limited login must not read as 'you typed the wrong password'."""
+    err = await _password_step_response(connection, routes, THROTTLED_HTML)
+    # Still a PorscheWrongCredentialsError, so existing handlers keep working.
+    assert isinstance(err, PorscheLoginThrottledError)
+    assert "blocked after multiple consecutive login attempts" in err.message
+
+
+@pytest.mark.asyncio
+async def test_unparseable_400_falls_back_to_generic_message(
+    connection: Connection, routes,
+):
+    """No reason in the page → the original generic message, not a crash."""
+    err = await _password_step_response(connection, routes, "<html><body/></html>")
+    assert not isinstance(err, PorscheLoginThrottledError)
+    assert err.message == "Wrong credentials"
