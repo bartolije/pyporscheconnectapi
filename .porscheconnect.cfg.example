@@ -1,0 +1,6 @@
+# Copy to .porscheconnect.cfg (gitignored) and fill in your own credentials.
+# The CLI and scripts/smoke_auth.py read this file from the repo root.
+[porsche]
+email = you@example.com
+password = your-porsche-connect-password
+session_file = .session

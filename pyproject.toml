@@ -14,6 +14,8 @@ ignore = [ "ANN", "CPY", "PLR2004", "PLR0912", "PLR0913", "PLR0917", "TC001", "C
 
 [tool.ruff.lint.per-file-ignores]
 "examples/*.py" = [ "INP001", "T201" ]
+# Operator-facing smoke script: prints are its output, and it lives outside the package.
+"scripts/*.py" = [ "INP001", "T201", "PLR0911" ]
 "tests/*.py" = [ "INP001", "S101", "D", "ARG001", "S105", "S106" ]
 
 [tool.pytest.ini_options]

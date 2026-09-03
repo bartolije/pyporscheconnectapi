@@ -137,3 +137,7 @@ dmypy.json
 # Local API exploration dumps (contain VIN, GPS, pairing code…)
 examples/_explore_out/
 .DS_Store
+
+# Local Porsche Connect credentials + artefacts (never commit)
+.porscheconnect.cfg
+porsche_captcha.html
