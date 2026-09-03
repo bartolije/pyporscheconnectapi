@@ -532,6 +532,9 @@ async def test_captcha_resume_in_fresh_client(email: str, password: str, routes)
             state=err.state,
             async_client=client_two,
             cookies=err.cookies,
+            # PKCE (upstream #96): the verifier minted in process 1 must
+            # travel with the captcha state, or the token exchange fails.
+            code_verifier=err.code_verifier,
         )
         await conn_two.get_token()
 

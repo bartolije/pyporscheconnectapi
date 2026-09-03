@@ -48,6 +48,7 @@ class Connection:
         token=None,
         leeway: int = 60,
         cookies: list[dict] | None = None,
+        code_verifier: str | None = None,
     ) -> None:
         """Initialise the connection to the Porsche Connect API."""
         if token is None:
@@ -72,6 +73,7 @@ class Connection:
             Credentials(email, password),
             Captcha(captcha_code, state),
             leeway,
+            code_verifier=code_verifier,
         )
 
     async def get_token(self):
