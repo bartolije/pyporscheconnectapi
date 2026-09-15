@@ -105,9 +105,9 @@ Please refer to the examples provided in the repository.
 ### Resuming a captcha challenge from another process
 
 Auth0 sometimes requires a captcha during login. The challenge is bound to
-the session cookies of the HTTP client that started it — since 0.4.0 the
-`PorscheCaptchaRequiredError` carries everything needed to resume the login
-elsewhere (another process, after a restart, ...):
+the session cookies *and* to the PKCE verifier of the HTTP client that started
+it — the `PorscheCaptchaRequiredError` carries everything needed to resume the
+login elsewhere (another process, after a restart, ...):
 
 ```python
 from pyporscheconnectapi.connection import Connection
@@ -117,17 +117,22 @@ try:
     connection = Connection(email, password)
     await connection.get_token()
 except PorscheCaptchaRequiredError as err:
-    persist(err.captcha, err.state, err.cookies)  # cookies is JSON-compatible
+    # cookies is JSON-compatible
+    persist(err.captcha, err.state, err.cookies, err.code_verifier)
 
 # ... later, in a fresh process, once the captcha is solved:
 connection = Connection(
     email, password,
     captcha_code=solved_code, state=state, cookies=cookies,
+    code_verifier=code_verifier,
 )
 await connection.get_token()
 ```
 
-Treat `err.cookies` like a password: it is the Auth0 session secret.
+Treat `err.cookies` and `err.code_verifier` like passwords: they are the Auth0
+session secrets. Since 0.5.0 the verifier is mandatory (Auth0 enforces PKCE on
+this client) — resuming without it raises
+`PKCE_VERIFIER_MISSING_FOR_CAPTCHA_RESUME`.
 
 ### Transient error handling
 

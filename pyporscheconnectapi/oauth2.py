@@ -4,6 +4,7 @@
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import re
@@ -42,6 +43,14 @@ _LOGGER = logging.getLogger(__name__)
 # endpoint will mint the authorization code. Poll immediately, then back off —
 # a fixed sleep penalised every login even when Auth0 was already ready.
 _RESUME_POLL_DELAYS = (0.0, 0.5, 1.0, 2.0, 2.5)
+
+# Auth0 interleaves extra screens into the resume redirect chain (passkey
+# enrollment since mid-2026), so the chain is followed hop by hop instead of
+# expecting a single redirect straight to the authorization code.
+PASSKEY_ENROLLMENT_PATH = "/u/passkey-enrollment"
+_MAX_RESUME_REDIRECTS = 10
+_REDIRECT_STATUS_CODES = frozenset({302, 303, 307, 308})
+_HTTP_OK = 200
 
 
 class Credentials(NamedTuple):
@@ -108,6 +117,8 @@ class OAuth2Client:
     :param client: httpx.AsyncClient
     :param credentials: tuple of email, password
     :param leeway: time in seconds to consider token as expired before it actually expires
+    :param code_verifier: PKCE verifier of an interrupted login, to resume a captcha
+        challenge started by another process
     """
 
     def __init__(
@@ -116,6 +127,8 @@ class OAuth2Client:
         credentials: Credentials,
         captcha: Captcha,
         leeway: int = 60,
+        *,
+        code_verifier: str | None = None,
     ):
         """Initialise the oauth2 client."""
         self.client = client
@@ -123,6 +136,18 @@ class OAuth2Client:
         self.captcha = captcha
         self.leeway = leeway
         self.headers = {"User-Agent": USER_AGENT, "X-Client-ID": X_CLIENT_ID}
+        # Auth0 enforces PKCE (RFC 7636) on this client: the verifier is minted
+        # with the /authorize request and replayed at the token exchange.
+        self.code_verifier: str | None = code_verifier
+
+    def _generate_pkce_verifier(self) -> str:
+        """Generate a PKCE code verifier (RFC 7636 section 4.1)."""
+        return secrets.token_urlsafe(64)
+
+    def _build_pkce_challenge(self, verifier: str) -> str:
+        """Derive the S256 code challenge from a verifier (RFC 7636 section 4.2)."""
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
     async def ensure_valid_token(self, token: OAuth2Token):
         """Ensure the access_token is valid, logging in or refreshing if necessary."""
@@ -144,11 +169,12 @@ class OAuth2Client:
 
         Requires 1-4 requests (1 if already logged in, 4 if not):
 
-        1. Initial request to /authorize to get the code
+        1. Initial request to /authorize to get the code (with a PKCE challenge)
         2. If no code is returned, login with Identifier First flow:
             2a. POST to /u/login/identifier with email
             2b. POST to /u/login/password with password
-        3. Resume the /authorize request with the resume path from the Identifier First flow
+        3. Resume the /authorize request with the resume path from the Identifier First flow,
+           following the redirect chain (and declining the passkey enrollment screen)
 
         :return: authorization code to be exchanged for an access token
         """
@@ -158,9 +184,17 @@ class OAuth2Client:
             # self.captcha.state). Skip that round-trip and resume the
             # Identifier First flow directly.
             if self.captcha.captcha_code is not None:
+                if self.code_verifier is None:
+                    # The verifier is bound to the /authorize request that
+                    # issued the challenge — Auth0 rejects the code exchange
+                    # without it. A caller resuming from another process must
+                    # carry PorscheCaptchaRequiredError.code_verifier over.
+                    msg = "PKCE_VERIFIER_MISSING_FOR_CAPTCHA_RESUME"
+                    raise PorscheExceptionError(msg)
                 state = self.captcha.state
             else:
                 _LOGGER.debug("Fetching authorization code.")
+                self.code_verifier = self._generate_pkce_verifier()
                 params = await self.get_and_extract_location_params(
                     AUTHORIZATION_URL,
                     params={
@@ -169,6 +203,8 @@ class OAuth2Client:
                         "redirect_uri": REDIRECT_URI,
                         "audience": AUDIENCE,
                         "scope": SCOPE,
+                        "code_challenge": self._build_pkce_challenge(self.code_verifier),
+                        "code_challenge_method": "S256",
                         # Anti-CSRF token, regenerated per request.
                         # RFC 6749 §10.12 recommends a non-guessable value.
                         "state": secrets.token_urlsafe(16),
@@ -185,7 +221,7 @@ class OAuth2Client:
                 state = params["state"][0]
 
             resume_path = await self.login_with_identifier(state)
-            authorization_code = await self._poll_resume_for_code(
+            authorization_code = await self.resume_authorization_code_flow(
                 urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
             )
 
@@ -195,28 +231,125 @@ class OAuth2Client:
         _LOGGER.debug("Authorization code: %s", authorization_code)
         return authorization_code
 
-    async def _poll_resume_for_code(self, resume_url: str) -> str:
-        """Poll the resume endpoint until Auth0 mints the authorization code.
+    async def resume_authorization_code_flow(self, resume_url: str) -> str:
+        """Resume the /authorize request and return the authorization code.
 
-        Ends the wait as soon as the code is available instead of always
-        paying a fixed settle delay, and surfaces an explicit error when
-        the code never shows up (previously a silent None that blew up
-        later in the code→token exchange with a misleading message).
+        Polls the resume endpoint — Auth0 sometimes needs a moment before it
+        mints the code, and ending the wait as soon as it is available beats
+        paying a fixed settle delay on every login. Each attempt follows the
+        whole redirect chain, since Auth0 may route through extra screens
+        (passkey enrollment) before handing out the code.
+
+        :param resume_url: resume URL returned by the Identifier First flow
+        :return: authorization code to be exchanged for an access token
         """
-        last_error: PorscheExceptionError | None = None
         for attempt, delay in enumerate(_RESUME_POLL_DELAYS):
             if delay:
                 await asyncio.sleep(delay)
-            try:
-                params = await self.get_and_extract_location_params(resume_url)
-            except PorscheExceptionError as exc:  # non-302: Auth0 not ready yet
-                last_error = exc
-                continue
-            if (code := params.get("code", [None])[0]) is not None:
+            code = await self._follow_resume_redirects(resume_url)
+            if code is not None:
                 return code
             _LOGGER.debug("Resume attempt %d returned no authorization code yet.", attempt + 1)
         msg = f"Auth0 resume returned no authorization code after {len(_RESUME_POLL_DELAYS)} attempts"
-        raise PorscheExceptionError(msg) from last_error
+        raise PorscheExceptionError(msg)
+
+    async def _follow_resume_redirects(self, resume_url: str) -> str | None:
+        """Follow the Auth0 redirect chain until the authorization code shows up.
+
+        :param resume_url: resume URL returned by the Identifier First flow
+        :return: the authorization code, or None when Auth0 is not ready yet
+            (the caller retries); structural failures raise instead.
+        """
+        current_url = resume_url
+
+        for _ in range(_MAX_RESUME_REDIRECTS):
+            parsed = urlparse(current_url)
+            # Checked before fetching: the last hop is the app callback URL,
+            # which lives outside Auth0 and must not be requested.
+            code = parse_qs(parsed.query).get("code", [None])[0]
+            if code is not None:
+                return code
+
+            if parsed.scheme not in ("http", "https"):
+                # Handed over to the app callback scheme (my-porsche-app://)
+                # without a code — nothing fetchable left in the chain.
+                _LOGGER.debug("Resume chain ended at %s with no authorization code.", parsed.scheme)
+                return None
+
+            resp = await self.client.get(
+                current_url,
+                timeout=TIMEOUT,
+                headers=self.headers,
+                follow_redirects=False,
+            )
+
+            if resp.status_code in _REDIRECT_STATUS_CODES:
+                current_url = urljoin(str(resp.url), resp.headers["Location"])
+                continue
+
+            if resp.status_code == _HTTP_OK and PASSKEY_ENROLLMENT_PATH in resp.url.path:
+                current_url = await self._skip_passkey_enrollment(str(resp.url), resp.text)
+                continue
+
+            _LOGGER.debug(
+                "Unexpected response %s at %s while resuming authorization.",
+                resp.status_code,
+                resp.url,
+            )
+            return None
+
+        msg = "AUTHORIZATION_CODE_REDIRECT_LOOP"
+        raise PorscheExceptionError(msg)
+
+    async def _skip_passkey_enrollment(self, url: str, html: str | None = None) -> str:
+        """Decline the optional passkey enrollment screen and return where to continue.
+
+        :param url: URL of the passkey enrollment screen
+        :param html: its HTML, when already fetched
+        :return: URL to continue the resume chain with
+        """
+        if html is None:
+            resp = await self.client.get(
+                url,
+                timeout=TIMEOUT,
+                headers=self.headers,
+                follow_redirects=False,
+            )
+            resp.raise_for_status()
+            html = resp.text
+
+        context = self._extract_universal_login_context(html)
+        if context is None:
+            msg = "PASSKEY_ENROLLMENT_CONTEXT_MISSING"
+            raise PorscheExceptionError(msg)
+
+        transaction_state = context.get("transaction", {}).get("state")
+        if not transaction_state:
+            msg = "PASSKEY_ENROLLMENT_STATE_MISSING"
+            raise PorscheExceptionError(msg)
+
+        data = dict(context.get("untrustedData", {}).get("submittedFormData") or {})
+        data.update(
+            {
+                "state": transaction_state,
+                "action": "abort-passkey-enrollment",
+                "acul-sdk": "@auth0/auth0-acul-js@1.2.0",
+            },
+        )
+
+        _LOGGER.debug("Declining passkey enrollment.")
+        resp = await self.client.post(
+            url,
+            data=data,
+            timeout=TIMEOUT,
+            headers=self.headers,
+            follow_redirects=False,
+        )
+        if resp.status_code not in _REDIRECT_STATUS_CODES:
+            msg = "PASSKEY_ENROLLMENT_SKIP_FAILED"
+            raise PorscheExceptionError(msg)
+
+        return urljoin(url, resp.headers["Location"])
 
     async def get_and_extract_location_params(self, url, params=None):
         """GET the URL and extract the params from the Location header.
@@ -256,23 +389,30 @@ class OAuth2Client:
         new_query.update(params)
         return new_query
 
+    def _extract_universal_login_context(self, html: str) -> dict | None:
+        """Extract the Auth0 universal login (ACUL) context from its inline base64 payload."""
+        match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
+        if not match:
+            return None
+
+        try:
+            decoded = base64.b64decode(match.group(1)).decode("utf-8")
+            return json.loads(decoded)
+        except (ValueError, json.JSONDecodeError, binascii.Error) as exc:
+            _LOGGER.warning("Failed to parse Auth0 universal login context: %s", exc)
+            return None
+
     def _extract_captcha_image(self, html: str):
         """Extract the captcha image from Auth0 ACUL or legacy login HTML."""
-        script_match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
-        if script_match:
-            try:
-                decoded_json = base64.b64decode(script_match.group(1)).decode("utf-8")
-                context_data = json.loads(decoded_json)
-            except (ValueError, json.JSONDecodeError, binascii.Error) as exc:
-                _LOGGER.warning("Failed to parse Auth0 ACUL context: %s", exc)
-            else:
-                captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
-                if captcha_img:
-                    _LOGGER.debug(
-                        "Parsed captcha from Auth0 ACUL context (length: %d)",
-                        len(captcha_img),
-                    )
-                    return captcha_img
+        context_data = self._extract_universal_login_context(html)
+        if context_data is not None:
+            captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
+            if captcha_img:
+                _LOGGER.debug(
+                    "Parsed captcha from Auth0 ACUL context (length: %d)",
+                    len(captcha_img),
+                )
+                return captcha_img
 
         soup = BeautifulSoup(html, "html.parser")
         img_tag = soup.find("img", {"alt": "captcha"})
@@ -343,6 +483,7 @@ class OAuth2Client:
                 captcha=captcha_img,
                 state=state,
                 cookies=serialize_cookies(self.client.cookies),
+                code_verifier=self.code_verifier,
             )
 
         # 2. /u/login/password w/ password
@@ -394,6 +535,8 @@ class OAuth2Client:
             "code": authorization_code,
             "redirect_uri": REDIRECT_URI,
         }
+        if self.code_verifier is not None:
+            data["code_verifier"] = self.code_verifier
 
         try:
             _LOGGER.debug("Exchanging the authorization code for an access token.")
@@ -405,7 +548,12 @@ class OAuth2Client:
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as exc:
-            raise PorscheExceptionError(exc.response.status_code) from exc
+            # The body carries Auth0's reason (invalid PKCE verifier, expired
+            # code, ...) — "BAD_REQUEST" on its own is undebuggable.
+            raise PorscheExceptionError(
+                exc.response.status_code,
+                response_body=exc.response.text[:1000] or None,
+            ) from exc
 
     async def refresh_token(self, refresh_token):
         """Use the provided refresh token to get a new access token.
@@ -432,4 +580,7 @@ class OAuth2Client:
             # clear the access token so the full login flow can happen again
             if exc.response.status_code == 403:
                 return {"access_token": None, "expires_in": 0}
-            raise PorscheExceptionError(exc.response.status_code) from exc
+            raise PorscheExceptionError(
+                exc.response.status_code,
+                response_body=exc.response.text[:1000] or None,
+            ) from exc

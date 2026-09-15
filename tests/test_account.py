@@ -115,7 +115,10 @@ async def test_get_vehicles_propagates_auth_failure(
         with pytest.raises(PorscheExceptionError) as exc_info:
             await account.get_vehicles()
     assert exc_info.value.code == 401
-    assert exc_info.value.message == "UNAUTHORIZED"
+    assert exc_info.value.message.startswith("UNAUTHORIZED")
+    # The API response body is appended: "UNAUTHORIZED" on its own says nothing
+    # about what the endpoint actually complained about.
+    assert exc_info.value.response_body == '{"error":"unauthorized"}'
 
 
 @pytest.mark.asyncio

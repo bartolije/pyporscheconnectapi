@@ -8,6 +8,7 @@ import configparser
 import json
 import logging
 import sys
+from datetime import date, datetime
 from getpass import getpass
 from pathlib import Path
 
@@ -77,7 +78,11 @@ async def get_vehicles_with_captcha_retry(controller, connection):
     except PorscheCaptchaRequiredError as captcha_err:
         captcha_file = Path("porsche_captcha.html")
         async with aiofiles.open(captcha_file, "w", encoding="utf-8") as f:
-            await f.write(f'<img src="{captcha_err.captcha}" />')
+            # A bare <img> tag is not a document: some browsers refuse to render it.
+            await f.write(
+                '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                f'<title>Captcha</title></head><body><img alt="captcha" src="{captcha_err.captcha}"/></body></html>',
+            )
 
         printc(
             "\n⚠️ CAPTCHA required.\n"
@@ -251,6 +256,14 @@ async def save_token(session_file, token):
         await f.write(json.dumps(token, ensure_ascii=False, indent=2))
 
 
+def _json_default(obj):
+    """Serialise the datetime/date values the API layer parses out of payloads."""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    msg = f"Can't convert type {type(obj)}"
+    raise TypeError(msg)
+
+
 async def main(args):
     """Get arguments from parser and run command."""
     token = await load_token(args.session_file)
@@ -286,7 +299,7 @@ async def main(args):
         sys.exit(e.message)
     else:
         if args.json:
-            printj(json.dumps(response, indent=2))
+            printj(json.dumps(response, indent=2, sort_keys=True, default=_json_default))
         else:
             printc(response)
     await connection.close()

@@ -12,9 +12,13 @@ _LOGGER = logging.getLogger(__name__)
 class PorscheExceptionError(Exception):
     """Class of Porsche API exceptions."""
 
-    def __init__(self, code=None, *args, **kwargs) -> None:
+    def __init__(self, code=None, *args, response_body=None, request_url=None, **kwargs) -> None:
         """Initialize exceptions for the Porsche API."""
         self.message = ""
+        # Kept alongside the status code: "BAD_REQUEST" alone says nothing
+        # about which call failed nor what the API complained about.
+        self.response_body = response_body
+        self.request_url = request_url
         super().__init__(*args, **kwargs)
         if code is not None:
             self.code = code
@@ -44,6 +48,9 @@ class PorscheExceptionError(Exception):
             elif self.code > 299:
                 self.message = f"UNKNOWN_ERROR_{self.code}"
 
+        if self.response_body:
+            self.message = f"{self.message}: {self.response_body}"
+
 
 class PorscheWrongCredentialsError(PorscheExceptionError):
     """Class of exceptions for incomplete credentials."""
@@ -55,8 +62,9 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
     captcha: str | None = None
     state: str | None = None
     cookies: list[dict[str, Any]] | None = None
+    code_verifier: str | None = None
 
-    def __init__(self, captcha=None, state=None, cookies=None):
+    def __init__(self, captcha=None, state=None, cookies=None, code_verifier=None):
         """Initialize the captcha exception."""
         if captcha is not None and state is not None:
             # Don't log the captcha payload itself — it's a ~14 KB base64
@@ -69,10 +77,12 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
             self.captcha = captcha
             self.state = state
 
-        # The serialised Auth0 session, so a NEW process can resume the
-        # captcha challenge: Connection(..., captcha_code=, state=, cookies=).
-        # Session secret: kept OUT of Exception.args (args end up in logs).
+        # The serialised Auth0 session and the PKCE verifier of the interrupted
+        # /authorize request, so a NEW process can resume the captcha challenge:
+        # Connection(..., captcha_code=, state=, cookies=, code_verifier=).
+        # Session secrets: kept OUT of Exception.args (args end up in logs).
         self.cookies = cookies
+        self.code_verifier = code_verifier
 
         super().__init__(captcha, state)
 

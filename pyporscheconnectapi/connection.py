@@ -36,6 +36,8 @@ class Connection:
     :param leeway: time in seconds to consider token as expired before it actually expires
     :param cookies: serialised Auth0 session (PorscheCaptchaRequiredError.cookies)
         to resume a captcha challenge from another process
+    :param code_verifier: PKCE verifier of the interrupted login
+        (PorscheCaptchaRequiredError.code_verifier), required with the above
     """
 
     def __init__(
@@ -48,6 +50,7 @@ class Connection:
         token=None,
         leeway: int = 60,
         cookies: list[dict] | None = None,
+        code_verifier: str | None = None,
     ) -> None:
         """Initialise the connection to the Porsche Connect API."""
         if token is None:
@@ -72,6 +75,7 @@ class Connection:
             Credentials(email, password),
             Captcha(captcha_code, state),
             leeway,
+            code_verifier=code_verifier,
         )
 
     async def get_token(self):
@@ -141,7 +145,11 @@ class Connection:
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(resp.status_code) from exc
+                raise PorscheExceptionError(
+                    resp.status_code,
+                    response_body=resp.text[:1000] or None,
+                    request_url=str(exc.request.url),
+                ) from exc
             return resp.json()
 
     async def close(self):

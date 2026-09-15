@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import json
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -488,7 +491,8 @@ async def test_captcha_error_carries_cookies(connection: Connection, routes):
 @pytest.mark.asyncio
 async def test_captcha_resume_in_fresh_client(email: str, password: str, routes):
     """THE multi-process scenario: process 1 hits the captcha, process 2
-    resumes it with a brand-new httpx client seeded from err.cookies/state.
+    resumes it with a brand-new httpx client seeded from
+    err.cookies/state/code_verifier.
     """
     routes.get("/authorize").mock(
         return_value=httpx.Response(
@@ -532,6 +536,7 @@ async def test_captcha_resume_in_fresh_client(email: str, password: str, routes)
             state=err.state,
             async_client=client_two,
             cookies=err.cookies,
+            code_verifier=err.code_verifier,
         )
         await conn_two.get_token()
 
@@ -545,3 +550,145 @@ async def test_captcha_resume_in_fresh_client(email: str, password: str, routes)
     resumed_request = identifier_route.calls[-1].request
     assert "auth0=tx123" in resumed_request.headers.get("Cookie", "")
     assert "captcha=ABC123" in resumed_request.content.decode()
+
+
+# -- PKCE + passkey enrollment (Auth0 changes, 2026) ------------------------
+
+
+def _acul_page(context: dict) -> str:
+    """Render an Auth0 universal login page carrying the given inline context."""
+    payload = base64.b64encode(json.dumps(context).encode()).decode()
+    return f'<html><body><script>var ctx = JSON.parse(atob("{payload}"));</script></body></html>'
+
+
+PASSKEY_PAGE = _acul_page(
+    {
+        "transaction": {"state": "PKSTATE"},
+        "screen": {"name": "passkey-enrollment"},
+        "untrustedData": {"submittedFormData": {"js-available": "true"}},
+    },
+)
+
+
+@pytest.mark.asyncio
+async def test_authorize_request_carries_pkce_challenge(
+    connection: Connection, routes,
+):
+    """Auth0 requires PKCE: /authorize must send an S256 challenge and the
+    token exchange the matching verifier.
+    """
+    authorize_route = routes.get("/authorize")
+    authorize_route.mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    token_route = routes.post("/oauth/token")
+    token_route.mock(return_value=httpx.Response(200, json=TOKEN_PAYLOAD))
+
+    await connection.get_token()
+
+    authorize_params = authorize_route.calls[-1].request.url.params
+    assert authorize_params["code_challenge_method"] == "S256"
+    challenge = authorize_params["code_challenge"]
+
+    token_body = parse_qs(token_route.calls[-1].request.content.decode())
+    verifier = token_body["code_verifier"][0]
+    # The challenge Auth0 stored must be the S256 hash of the replayed verifier.
+    expected = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest(),
+    ).rstrip(b"=").decode()
+    assert challenge == expected
+
+
+@pytest.mark.asyncio
+async def test_passkey_enrollment_screen_is_declined(connection: Connection, routes):
+    """Auth0 now interleaves a passkey enrollment screen in the resume chain:
+    it must be declined so the login completes instead of stalling.
+    """
+    routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    routes.get("/authorize/resume").mock(
+        return_value=_redirect("/u/passkey-enrollment?state=PKSTATE"),
+    )
+    routes.get("/u/passkey-enrollment").mock(
+        return_value=httpx.Response(200, text=PASSKEY_PAGE),
+    )
+    passkey_post = routes.post("/u/passkey-enrollment")
+    passkey_post.mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    await connection.get_token()
+
+    assert connection.token["access_token"] == "fake.access.token"
+    body = parse_qs(passkey_post.calls[-1].request.content.decode())
+    assert body["action"] == ["abort-passkey-enrollment"]
+    # The transaction state comes from the screen itself, not from /authorize.
+    assert body["state"] == ["PKSTATE"]
+
+
+@pytest.mark.asyncio
+async def test_passkey_screen_without_context_raises(connection: Connection, routes):
+    """An enrollment screen we cannot parse fails loudly instead of silently
+    retrying until the generic "no authorization code" error.
+    """
+    routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    routes.get("/authorize/resume").mock(
+        return_value=_redirect("/u/passkey-enrollment?state=PKSTATE"),
+    )
+    routes.get("/u/passkey-enrollment").mock(
+        return_value=httpx.Response(200, text="<html><body>no context here</body></html>"),
+    )
+
+    with pytest.raises(PorscheExceptionError) as exc_info:
+        await connection.get_token()
+
+    assert exc_info.value.message == "PASSKEY_ENROLLMENT_CONTEXT_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_captcha_error_carries_code_verifier(connection: Connection, routes):
+    """The captcha error must expose the PKCE verifier of the interrupted login."""
+    routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
+    routes.post("/u/login/identifier").mock(
+        return_value=httpx.Response(400, text=SAMPLE_HTML_WITH_CAPTCHA),
+    )
+
+    with pytest.raises(PorscheCaptchaRequiredError) as exc_info:
+        await connection.get_token()
+
+    err = exc_info.value
+    assert err.code_verifier
+    # Session secret: must not leak into Exception.args (→ logs).
+    assert all(err.code_verifier not in str(arg) for arg in err.args)
+
+
+@pytest.mark.asyncio
+async def test_captcha_resume_without_verifier_raises(
+    email: str, password: str, routes,
+):
+    """Resuming a captcha without the verifier cannot work — say so up front
+    instead of letting Auth0 reject the token exchange with an opaque error.
+    """
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email,
+            password=password,
+            captcha_code="ABC123",
+            state="ST",
+            async_client=client,
+        )
+        with pytest.raises(PorscheExceptionError) as exc_info:
+            await conn.get_token()
+
+    assert exc_info.value.message == "PKCE_VERIFIER_MISSING_FOR_CAPTCHA_RESUME"
+    assert not routes.calls
