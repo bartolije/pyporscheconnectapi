@@ -108,6 +108,9 @@ async def fetch_vehicles(env: dict[str, str], client: httpx.AsyncClient):
             captcha_code=code,
             state=exc.state,
             async_client=client,
+            # Auth0 enforces PKCE: the verifier of the interrupted /authorize
+            # request has to come back with the captcha code.
+            code_verifier=exc.code_verifier,
         )
         account = PorscheConnectAccount(connection=conn)
         return conn, await account.get_vehicles()
