@@ -154,6 +154,10 @@ def test_has_remote_climatisation(authed_connection: Connection):
     )
     assert running.remote_climatise_on is True
 
+    for status, expected in (("HEATING", True), ("COOLING", True), ("ERROR", False)):
+        v = PorscheVehicle(connection=authed_connection, data={"HVAC_SUMMARY": {"status": status}})
+        assert v.remote_climatise_on is expected, status
+
 
 def test_has_remote_services(authed_connection: Connection):
     """has_remote_services reads REMOTE_ACCESS_AUTHORIZATION.isEnabled."""
