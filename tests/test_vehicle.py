@@ -349,3 +349,55 @@ def test_drivetrain_capabilities_missing_modeltype(authed_connection: Connection
     assert v.has_electric_drivetrain is False
     assert v.has_ice_drivetrain is False
     assert v.has_direct_charge is False
+
+
+def test_tire_pressures_from_per_corner_measurements(authed_connection: Connection):
+    """Cars that only report TIRE_PRESSURE_* still get readings, status and monitoring."""
+    v = PorscheVehicle(
+        connection=authed_connection,
+        data={
+            "TIRE_PRESSURE_FRONT_LEFT": {"differenceBar": -0.1, "actualPressureBar": 2.4},
+            "TIRE_PRESSURE_REAR_RIGHT": {"differenceBar": -0.6, "actualPressureBar": 2.0},
+        },
+    )
+    assert v.tire_pressures == {
+        "frontLeftTire": {"differenceBar": -0.1, "actualPressureBar": 2.4},
+        "rearRightTire": {"differenceBar": -0.6, "actualPressureBar": 2.0},
+    }
+    assert v.has_tire_pressure_monitoring is True
+    assert v.tire_pressure_status is False
+
+
+def test_tire_pressures_prefer_legacy_readings(authed_connection: Connection):
+    """The legacy measurement wins when it has per-tyre readings."""
+    legacy = {"frontLeftTire": {"differenceBar": 0.0}, "lastModified": "x"}
+    v = PorscheVehicle(
+        connection=authed_connection,
+        data={"TIRE_PRESSURE": legacy, "TIRE_PRESSURE_FRONT_LEFT": {"differenceBar": -0.5}},
+    )
+    assert v.tire_pressures == legacy
+    assert v.tire_pressure_status is True
+
+
+def test_climatisation_target_and_remaining_time(authed_connection: Connection):
+    """HVAC_SUMMARY reports the target in Kelvin and the remaining minutes."""
+    v = PorscheVehicle(
+        connection=authed_connection,
+        data={"HVAC_SUMMARY": {"status": "ON", "targetTemperature": 294.15, "remainingTime": 12}},
+    )
+    assert v.climatisation_target_temperature == 21.0
+    assert v.climatisation_remaining_time == 12
+    empty = PorscheVehicle(connection=authed_connection, data={})
+    assert empty.climatisation_target_temperature is None
+    assert empty.climatisation_remaining_time is None
+
+
+def test_last_global_update(authed_connection: Connection):
+    """GLOBAL_TIMESTAMP tells when the car last sent its data."""
+    v = PorscheVehicle(
+        connection=authed_connection,
+        data={"GLOBAL_TIMESTAMP": {"timestamp": "2026-11-06T06:30:00Z"}},
+    )
+    assert v.last_global_update.isoformat() == "2026-11-06T06:30:00+00:00"
+    assert PorscheVehicle(connection=authed_connection, data={}).last_global_update is None
+
