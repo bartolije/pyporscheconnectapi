@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v1
+      - uses: astral-sh/ruff-action@v3
         with:
           # Pinned to the local dev toolchain: an unpinned action pulls the
           # newest ruff, whose freshly-stabilised rules break CI out of the
