@@ -72,7 +72,7 @@ async def send_with_retries(
                 msg = f"transport error on {description}: {exc}"
                 raise PorscheExceptionError(msg) from exc
             delay = compute_retry_delay(None, attempt)
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Transient transport error on %s (%s) - retrying in %.1fs (attempt %d/%d)",
                 description,
                 exc.__class__.__name__,
@@ -84,7 +84,7 @@ async def send_with_retries(
             if response.status_code not in RETRY_STATUS_CODES or attempt == max_retries:
                 return response
             delay = compute_retry_delay(response, attempt)
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Transient HTTP %s on %s - retrying in %.1fs (attempt %d/%d)",
                 response.status_code,
                 description,

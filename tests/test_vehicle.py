@@ -54,7 +54,7 @@ async def test_get_stored_overview_populates_vehicle_data(
 
     # Measurements flattened into vehicle.data by key.
     assert vehicle.data["BATTERY_LEVEL"] == {"percent": 73}
-    assert vehicle.data["CLIMATIZER_STATE"] == {"isOn": False}
+    assert vehicle.data["HVAC_SUMMARY"]["status"] == "OFF"
     assert vehicle.data["LOCK_STATE_VEHICLE"] == {"isLocked": True}
 
 
@@ -127,15 +127,32 @@ def test_drivetrain_capabilities(
 
 
 def test_has_remote_climatisation(authed_connection: Connection):
-    """has_remote_climatisation flips on the presence of the CLIMATIZER_STATE key."""
+    """Climatisation is read from HVAC_SUMMARY (CLIMATIZER_STATE no longer reports it)."""
     no_climate = PorscheVehicle(connection=authed_connection, data={})
     assert no_climate.has_remote_climatisation is False
+    assert no_climate.remote_climatise_on is False
+    assert no_climate.seat_heating is None
 
+    legacy = PorscheVehicle(
+        connection=authed_connection,
+        data={"CLIMATIZER_STATE": {"isOn": True}},
+    )
+    assert legacy.has_remote_climatisation is False
+
+    zones = {"frontLeft": True, "frontRight": False}
     with_climate = PorscheVehicle(
         connection=authed_connection,
-        data={"CLIMATIZER_STATE": {"isOn": False}},
+        data={"HVAC_SUMMARY": {"status": "OFF", "climateZonesEnabled": zones}},
     )
     assert with_climate.has_remote_climatisation is True
+    assert with_climate.remote_climatise_on is False
+    assert with_climate.seat_heating == zones
+
+    running = PorscheVehicle(
+        connection=authed_connection,
+        data={"HVAC_SUMMARY": {"status": "ON"}},
+    )
+    assert running.remote_climatise_on is True
 
 
 def test_has_remote_services(authed_connection: Connection):

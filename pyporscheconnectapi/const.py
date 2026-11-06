@@ -5,7 +5,9 @@ REDIRECT_URI = "my-porsche-app://auth0/callback"
 AUDIENCE = "https://api.porsche.com"
 CLIENT_ID = "XhygisuebbrqQ80byOuU5VncxLIm8E6H"
 X_CLIENT_ID = "41843fb4-691d-4970-85c7-2673e8ecef40"
-USER_AGENT = "pyporscheconnectapi/0.5.0"
+# The Porsche app user agent: the API only wakes the car up for
+# currentoverview requests that carry it.
+USER_AGENT = "de.porsche.one/20.26.36-row+186611 (android)"
 API_BASE_URL = "https://api.ppa.porsche.com/app"
 AUTHORIZATION_URL = f"https://{AUTHORIZATION_SERVER}/authorize"
 TOKEN_URL = f"https://{AUTHORIZATION_SERVER}/oauth/token"
@@ -54,7 +56,6 @@ MEASUREMENTS = [
     "CHARGING_RATE",
     "CHARGING_SETTINGS",
     "CHARGING_SUMMARY",
-    "CLIMATIZER_STATE",
     "DEPARTURES",
     "E_RANGE",
     "FUEL_LEVEL",
@@ -63,6 +64,7 @@ MEASUREMENTS = [
     "GPS_LOCATION",
     "HEATING_STATE",
     "HVAC_STATE",
+    "HVAC_SUMMARY",
     "INTERMEDIATE_SERVICE_RANGE",
     "INTERMEDIATE_SERVICE_TIME",
     "LOCK_STATE_VEHICLE",

@@ -93,6 +93,7 @@ async def test_climatise_on_posts_remote_climatizer_start(
     body = json.loads(route.calls.last.request.content)
     assert body["key"] == "REMOTE_CLIMATIZER_START"
     assert body["payload"]["targetTemperature"] == 294.15
+    assert body["payload"]["spin"] is None
     assert body["payload"]["climateZonesEnabled"] == {
         "frontLeft": False, "frontRight": False,
         "rearLeft":  False, "rearRight":  False,

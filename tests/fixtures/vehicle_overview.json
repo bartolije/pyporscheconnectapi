@@ -18,9 +18,14 @@
       "value": {"percent": 73}
     },
     {
-      "key": "CLIMATIZER_STATE",
+      "key": "HVAC_SUMMARY",
       "status": {"isEnabled": true},
-      "value": {"isOn": false}
+      "value": {
+        "type": "CLIMATIZER",
+        "status": "OFF",
+        "targetTemperature": 293.15,
+        "climateZonesEnabled": {"frontLeft": false, "frontRight": false}
+      }
     },
     {
       "key": "REMOTE_ACCESS_AUTHORIZATION",
