@@ -155,13 +155,14 @@ class OAuth2Client:
             token_data = await self.refresh_token(token.refresh_token)
             token.update(token_data)
             token.expires_at = token_data["expires_in"]
-            _LOGGER.debug("Refreshed Access Token: %s", token.access_token)
+            # Never log the tokens or the code: users paste debug logs into issues.
+            _LOGGER.debug("Refreshed the access token (received: %s).", token.access_token is not None)
         if token.access_token is None or token_is_expired is None:  # no token, get a new one
             auth_code = await self.fetch_authorization_code()
             token_data = await self.fetch_access_token(auth_code)
             token.update(token_data)
             token.expires_at = token_data["expires_in"]
-            _LOGGER.debug("New Access Token: %s", token.access_token)
+            _LOGGER.debug("Got a new access token (received: %s).", token.access_token is not None)
 
     async def fetch_authorization_code(self):
         """Fetch the authorization code from Porsche Connect.
@@ -227,7 +228,7 @@ class OAuth2Client:
         except httpx.HTTPStatusError as exc:
             raise PorscheExceptionError(exc.response.status_code) from exc
 
-        _LOGGER.debug("Authorization code: %s", authorization_code)
+        _LOGGER.debug("Got the authorization code.")
         return authorization_code
 
     async def _poll_resume_for_code(self, resume_url: str) -> str:
