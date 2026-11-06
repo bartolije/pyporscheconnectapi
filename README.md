@@ -1,5 +1,14 @@
-# pyporscheconnectapi
+# pyporscheconnectapi (bartolije fork)
 A python library for Porsche Connect API
+
+> Fork of [CJNE/pyporscheconnectapi](https://github.com/CJNE/pyporscheconnectapi)
+> by [Johan Isacsson](https://github.com/CJNE) and its contributors, maintained by
+> [bartolije](https://github.com/bartolije). It is published on PyPI as
+> **`pyporscheconnectapi-bartolije`** (the module is still imported as
+> `pyporscheconnectapi`) and is used by the
+> [bartolije/ha-porscheconnect](https://github.com/bartolije/ha-porscheconnect)
+> Home Assistant integration. Fixes that also apply upstream are sent back as
+> pull requests.
 
 This library will let you access your car equipped with Porsche Connect. It does not work with the predecessor Porsche Car Connect.
 Porsche Connect is available for the following Porsche models:
@@ -22,13 +31,13 @@ A Porsche Connect subscription alse needs to be active for it to work.
 
 The easiest method is to install using pip3/pip (venv is also a good idea).
 ```
-pip install pyporscheconnectapi
+pip install pyporscheconnectapi-bartolije
 ```
 
 to update to the latest version
 
 ```
-pip install pyporscheconnectapi -U
+pip install pyporscheconnectapi-bartolije -U
 ```
 
 Setup will add a cli under the name porschecli, see below for usage.
@@ -95,7 +104,7 @@ session_file=<file to store session information>
 
 ## Library usage
 
-Install pyporscheconnectapi using pip (requires python >= 3.10)
+Install pyporscheconnectapi-bartolije using pip (requires python >= 3.10)
 
 
 ### Example client usage
