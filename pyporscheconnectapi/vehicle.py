@@ -17,6 +17,15 @@ _LOGGER = logging.getLogger(__name__)
 
 BASE_DATA = ["vin", "modelName", "modelType", "systemInfo", "timestamp"]
 
+# Per-corner tyre measurements of the current API, mapped to the keys of the
+# legacy TIRE_PRESSURE measurement that some cars still report.
+_TIRE_CORNERS = {
+    "TIRE_PRESSURE_FRONT_LEFT": "frontLeftTire",
+    "TIRE_PRESSURE_FRONT_RIGHT": "frontRightTire",
+    "TIRE_PRESSURE_REAR_LEFT": "rearLeftTire",
+    "TIRE_PRESSURE_REAR_RIGHT": "rearRightTire",
+}
+
 
 def _parse_porsche_datetime(datetime_str: str) -> datetime.datetime:
     """Parse Porsche API timestamps, including UTC timestamps with a trailing Z."""
@@ -142,6 +151,23 @@ class PorscheVehicle:
         return status is not None and status != "OFF"
 
     @property
+    def climatisation_target_temperature(self) -> float | None:
+        """Return the climatisation target temperature in °C, if reported."""
+        kelvin = (self.data.get("HVAC_SUMMARY") or {}).get("targetTemperature")
+        return round(kelvin - 273.15, 1) if kelvin is not None else None
+
+    @property
+    def climatisation_remaining_time(self) -> int | None:
+        """Return the remaining climatisation time in minutes while it runs."""
+        return (self.data.get("HVAC_SUMMARY") or {}).get("remainingTime")
+
+    @property
+    def last_global_update(self) -> datetime.datetime | None:
+        """Return when the car last sent its data, if reported."""
+        timestamp = (self.data.get("GLOBAL_TIMESTAMP") or {}).get("timestamp")
+        return _parse_porsche_datetime(timestamp) if timestamp else None
+
+    @property
     def seat_heating(self) -> dict | None:
         """Return the climate zones the vehicle reports, with their state."""
         zones = (self.data.get("HVAC_SUMMARY") or {}).get("climateZonesEnabled")
@@ -170,11 +196,11 @@ class PorscheVehicle:
     @property
     def tire_pressure_status(self) -> bool:
         """Return true if tire pressure is within the tolerances."""
-        tire_pressure_status = self.data.get("TIRE_PRESSURE") or {}
+        readings = self.tire_pressures or {}
         differences = [
-            abs(tire_pressure_status[key]["differenceBar"])
-            for key in tire_pressure_status
-            if key.endswith("Tire")
+            abs(value["differenceBar"])
+            for key, value in readings.items()
+            if key.endswith("Tire") and isinstance(value, dict) and value.get("differenceBar") is not None
         ]
         # No per-tire readings (or no TIRE_PRESSURE at all): nothing out of
         # tolerance, so report OK rather than IndexError on an empty list.
@@ -184,13 +210,25 @@ class PorscheVehicle:
 
     @property
     def tire_pressures(self) -> dict | None:
-        """Return a dict containing tire pressure readings."""
-        return self.data.get("TIRE_PRESSURE")
+        """Return the tyre readings keyed frontLeftTire, frontRightTire, ...
+
+        Taken from the legacy TIRE_PRESSURE measurement when it carries per-tyre
+        readings, else from the per-corner TIRE_PRESSURE_* measurements.
+        """
+        legacy = self.data.get("TIRE_PRESSURE")
+        if isinstance(legacy, dict) and any(key.endswith("Tire") for key in legacy):
+            return legacy
+        corners = {
+            name: self.data[key]
+            for key, name in _TIRE_CORNERS.items()
+            if isinstance(self.data.get(key), dict)
+        }
+        return corners or legacy
 
     @property
     def has_tire_pressure_monitoring(self) -> bool:
         """Return True if vehicle has tire pressure monitoring."""
-        return self.data.get("TIRE_PRESSURE") is not None
+        return self.tire_pressures is not None
 
     @property
     def charging_target(self) -> int | None:
