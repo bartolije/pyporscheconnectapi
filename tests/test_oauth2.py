@@ -750,3 +750,34 @@ async def test_captcha_resume_without_verifier_raises(
 
     assert exc_info.value.message == "PKCE_VERIFIER_MISSING_FOR_CAPTCHA_RESUME"
     assert not routes.calls
+
+
+@pytest.mark.asyncio
+async def test_debug_log_never_holds_tokens_or_code(
+    email: str, password: str, routes, caplog,
+):
+    """Users paste debug logs into issues: no token or code may end up there."""
+    caplog.set_level("DEBUG", logger="pyporscheconnectapi")
+    routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
+    routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
+    routes.post("/u/login/password").mock(
+        return_value=_redirect("/authorize/resume?state=ST"),
+    )
+    routes.get("/authorize/resume").mock(
+        return_value=_redirect(f"{REDIRECT_URI}?code=AUTHCODE&state=ST"),
+    )
+    routes.post("/oauth/token").mock(
+        return_value=httpx.Response(200, json=TOKEN_PAYLOAD),
+    )
+
+    async with httpx.AsyncClient() as client:
+        login = Connection(email=email, password=password, async_client=client)
+        await login.get_token()
+        refresh = Connection(
+            email=email, password=password, async_client=client, token=_expired_token(),
+        )
+        await refresh.get_token()
+
+    assert refresh.token["access_token"] == "fake.access.token"
+    for secret in ("AUTHCODE", "fake.access.token", "fake.refresh.token"):
+        assert secret not in caplog.text
