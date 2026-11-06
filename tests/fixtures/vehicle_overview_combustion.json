@@ -29,7 +29,7 @@
     {"key": "E_RANGE", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
     {"key": "BATTERY_LEVEL", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
     {"key": "CHARGING_SUMMARY", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
-    {"key": "CLIMATIZER_STATE", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
+    {"key": "HVAC_SUMMARY", "status": {"isEnabled": false, "cause": "NOT_SUPPORTED"}},
     {
       "key": "GLOBAL_PRIVACY_MODE",
       "status": {"isEnabled": true},

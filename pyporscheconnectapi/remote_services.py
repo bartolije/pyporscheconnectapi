@@ -129,6 +129,7 @@ class RemoteServices:
         payload = {
             "key": "REMOTE_CLIMATIZER_START",
             "payload": {
+                "spin": None,
                 "climateZonesEnabled": {
                     "frontLeft": front_left,
                     "frontRight": front_right,
