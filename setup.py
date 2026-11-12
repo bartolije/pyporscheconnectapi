@@ -22,7 +22,7 @@ setup(
         "Issues": "https://github.com/bartolije/pyporscheconnectapi/issues",
         "Original project": "https://github.com/CJNE/pyporscheconnectapi",
     },
-    license="MIT",
+    license_expression="MIT",
     packages=["pyporscheconnectapi"],
     python_requires=">=3.12",
     install_requires=[
@@ -32,7 +32,6 @@ setup(
         "rich",
     ],
     classifiers=[
-        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
