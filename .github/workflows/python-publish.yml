@@ -13,6 +13,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Waits for the maintainer's approval: nothing reaches PyPI by accident.
+    environment: release
     permissions:
       contents: read
       id-token: write  # for PyPI trusted publishing
