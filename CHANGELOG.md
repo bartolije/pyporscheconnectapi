@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-On `main`, not on PyPI yet: PyPI does not accept a second upload of 1.0.0.
+## 1.0.1
 
 ### Fixed
 
