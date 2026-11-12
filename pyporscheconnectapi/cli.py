@@ -285,7 +285,8 @@ async def main(args: argparse.Namespace) -> None:
     response: Any = {}
     try:
         if args.command == "token":
-            response = await connection.get_token()
+            # Checks the session; its secrets stay in the session file.
+            response = {key: "***" if key.endswith("token") else value for key, value in (await connection.get_token()).items()}
         else:
             vehicles = await get_vehicles_with_captcha_retry(controller, connection)
             if not vehicles:
