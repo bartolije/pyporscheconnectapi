@@ -18,11 +18,22 @@ First stable release of this fork. One release for everything below.
   when the API does not report it.
 - `porschecli list` prints a list of vehicles instead of one merged dictionary;
   the unused `--profileactive` option is gone.
+- `PorscheVehicle.vehicle_locked` returns `None`, not `False`, when the car
+  does not report its lock state.
 - `connection.log_request` (unused) is removed. `PorscheExceptionError` no
   longer accepts arbitrary keyword arguments.
 
 ### Fixed
 
+- A command (lock, unlock, climatisation, charging, honk and flash) was sent
+  again, up to three more times, after a 429, 502, 503, 504 or a network error,
+  although the first one may have reached the car. Only reads are retried now.
+- The debug log of an unlock held a hash a 4-digit PIN can be recovered from.
+  It now only names the command.
+- `main_battery_level` was always 0 for a plug-in hybrid.
+- An enabled measurement with a `null` value raised `AttributeError` and failed
+  the whole update.
+- `porschecli token` printed `None`.
 - `str()` of a `PorscheExceptionError` was empty; it is now the message.
 - With an `httpx2` client, which Home Assistant 2026.11 and later pass to the
   library, HTTP errors, network failures and a rejected refresh token escaped as

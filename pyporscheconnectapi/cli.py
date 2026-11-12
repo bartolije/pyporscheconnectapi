@@ -285,7 +285,7 @@ async def main(args: argparse.Namespace) -> None:
     response: Any = {}
     try:
         if args.command == "token":
-            response = controller.token
+            response = await connection.get_token()
         else:
             vehicles = await get_vehicles_with_captcha_retry(controller, connection)
             if not vehicles:

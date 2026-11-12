@@ -303,7 +303,8 @@ class RemoteServices:
         self,
         payload: dict[str, Any],
     ) -> RemoteServiceStatus:
-        _LOGGER.debug("Executing remote command with payload %s", payload)
+        # Not the payload: for UNLOCK it carries a hash a 4-digit PIN can be recovered from.
+        _LOGGER.debug("Executing remote command %s", payload.get("key"))
 
         response = await self._connection.post(
             f"/connect/v1/vehicles/{self._vehicle.vin}/commands",

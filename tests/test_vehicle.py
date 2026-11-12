@@ -604,3 +604,31 @@ def test_vehicle_locked_and_closed_defaults(authed_connection: Connection):
 def test_package_version_matches_pyproject():
     project = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]
     assert pyporscheconnectapi.__version__ == project["version"]
+
+
+@pytest.mark.asyncio
+async def test_enabled_measurement_with_null_value_is_skipped(authed_connection: Connection, api_routes):
+    api_routes.get(url__regex=r"/connect/v1/vehicles/WP0ZZZY1ZZS000001.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={"vin": "WP0ZZZY1ZZS000001", "measurements": [{"key": "CHARGING_SUMMARY", "status": {"isEnabled": True}, "value": None}]},
+        ),
+    )
+    vehicle = PorscheVehicle(vin="WP0ZZZY1ZZS000001", connection=authed_connection)
+
+    await vehicle.get_stored_overview()
+
+    assert "CHARGING_SUMMARY" not in vehicle.data
+
+
+def test_main_battery_level_of_a_plug_in_hybrid(authed_connection: Connection):
+    vehicle = PorscheVehicle(vin="WP0ZZZY1ZZS000001", data={"modelType": {"engine": "PHEV"}, "BATTERY_LEVEL": {"percent": 64}}, connection=authed_connection)
+
+    assert vehicle.main_battery_level == 64
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"), [({}, None), ({"LOCK_STATE_VEHICLE": {"isLocked": True}}, True), ({"LOCK_STATE_VEHICLE": {"isLocked": False}}, False)]
+)
+def test_vehicle_locked_is_unknown_when_not_reported(authed_connection: Connection, data, expected):
+    assert PorscheVehicle(vin="WP0ZZZY1ZZS000001", data=data, connection=authed_connection).vehicle_locked is expected

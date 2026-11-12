@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 
 import httpx
 import pytest
@@ -149,8 +151,10 @@ async def test_unlock_vehicle_round_trips_challenge_then_unlock(
     authed_connection: Connection,
     api_routes,
     monkeypatch,
+    caplog,
 ):
     """unlock_vehicle posts SPIN_CHALLENGE, then UNLOCK with the hashed pin."""
+    caplog.set_level(logging.DEBUG)
     await _drain_polling_sleep(monkeypatch)
 
     # The route fires twice — first for SPIN_CHALLENGE, then for UNLOCK.
@@ -175,8 +179,8 @@ async def test_unlock_vehicle_round_trips_challenge_then_unlock(
     spin = unlock_body["payload"]["spin"]
     assert spin["challenge"] == "abcdef"
     # SHA-512 of bytes.fromhex("1234abcdef") — 128 hex chars, uppercased.
-    assert len(spin["hash"]) == 128
-    assert spin["hash"].isupper()
+    assert spin["hash"] == hashlib.sha512(bytes.fromhex("1234abcdef")).hexdigest().upper()
+    assert spin["hash"] not in caplog.text
 
 
 @pytest.mark.asyncio
