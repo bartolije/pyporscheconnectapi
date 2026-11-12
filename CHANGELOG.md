@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The requests carry the user agent of the current app (21.26.46, build
+  195601). Porsche refuses app builds older than 183720; the previous one,
+  186611, was still accepted.
+
 ## 1.0.1
 
 ### Fixed
