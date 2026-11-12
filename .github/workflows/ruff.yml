@@ -23,6 +23,6 @@ jobs:
           # newest ruff, whose freshly-stabilised rules break CI out of the
           # blue (select ALL). Bump together with requirements_dev.txt and
           # .pre-commit-config.yaml.
-          version: 0.15.15
+          version: 0.17.4
       - name: Check formatting
         run: ruff format --check
