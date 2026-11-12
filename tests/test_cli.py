@@ -233,3 +233,22 @@ def test_cli_reads_password_containing_percent(tmp_path, monkeypatch):
 
     assert captured["args"].password == password
     assert captured["args"].email == "user@example.com"
+
+
+async def test_save_token_is_owner_only_even_on_an_existing_file(tmp_path):
+    session_file = tmp_path / "session.json"
+    session_file.write_text("{}")
+    session_file.chmod(0o644)
+
+    await cli.save_token(session_file, {"access_token": "A"})
+
+    assert session_file.stat().st_mode & 0o777 == 0o600
+
+
+async def test_main_saves_token_and_closes_when_the_command_fails(cli_env, tmp_path):
+    _FakeAccount.fail_with = RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await cli.main(cli_env(command="list"))
+
+    assert json.loads((tmp_path / "session.json").read_text()) == {"access_token": "A"}

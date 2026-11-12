@@ -7,12 +7,16 @@ import asyncio
 import configparser
 import json
 import logging
+import os
 import sys
 from datetime import date, datetime
 from getpass import getpass
 from pathlib import Path
 
-import aiofiles
+try:
+    import aiofiles
+except ImportError:  # pragma: no cover - the CLI extra is not installed
+    sys.exit("The CLI needs its extra dependencies: pip install 'pyporscheconnectapi-bartolije[cli]'")
 
 from pyporscheconnectapi.account import PorscheConnectAccount
 from pyporscheconnectapi.connection import Connection
@@ -51,8 +55,8 @@ try:
     console = Console()
     printc = console.print
     printj = console.print_json
-except ImportError:
-    pass
+except ImportError:  # pragma: no cover - the CLI extra is not installed
+    printc = printj = print
 
 logging.basicConfig()
 logging.root.setLevel(logging.WARNING)
@@ -248,8 +252,10 @@ async def async_input(prompt: str, *, strip: bool = True) -> str:
 
 async def save_token(session_file, token):
     """Save token to file."""
-    async with aiofiles.open(session_file, "w", encoding="utf-8") as f:
+    # The session file holds the tokens: owner-only, also when it already exists.
+    async with aiofiles.open(session_file, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as f:
         await f.write(json.dumps(token, ensure_ascii=False, indent=2))
+    await asyncio.to_thread(os.chmod, session_file, 0o600)
 
 
 def obj_to_json(obj):
@@ -257,7 +263,7 @@ def obj_to_json(obj):
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     msg = f"Can't convert type {type(obj)}"
-    raise TypeError (msg)
+    raise TypeError(msg)
 
 
 async def main(args):
@@ -283,14 +289,13 @@ async def main(args):
                 printc("No vehicles found.")
 
             if args.command == "list":
-                for vehicle in vehicles:
-                    response = response | vehicle.data
+                response = [vehicle.data for vehicle in vehicles]
             elif args.vin is not None:
                 vehicle = await controller.get_vehicle(args.vin)
                 if vehicle is not None:
                     response = await globals()[args.func](vehicle, args)
             else:
-                sys.exit("--vin or --all is required")
+                sys.exit("--vin is required")
     except PorscheWrongCredentialsError as e:
         sys.exit(e.message)
     else:
@@ -298,8 +303,10 @@ async def main(args):
             printj(json.dumps(response, indent=2, sort_keys=True, default=obj_to_json))
         else:
             printc(response)
-    await connection.close()
-    await save_token(args.session_file, connection.token)
+    finally:
+        # Also on failure: a token refreshed during the run must not be lost.
+        await connection.close()
+        await save_token(args.session_file, connection.token)
 
 
 def add_arg_vin(parser):
@@ -376,14 +383,6 @@ def cli():
                 required=False,
                 default=None,
                 help="Minimum charge level",
-            )
-            parser_command.add_argument(
-                "--profileactive",
-                dest="profileactive",
-                type=bool,
-                required=False,
-                default=None,
-                help="Profile active status",
             )
         if vcmd == "chargingsettings":
             parser_command.add_argument(
