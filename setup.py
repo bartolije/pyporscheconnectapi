@@ -8,13 +8,20 @@ from setuptools import setup
 setup(
     name="pyporscheconnectapi-bartolije",
     version="0.6.2",
-    author="Johan Isaksson",
-    author_email="johan@generatorhallen.se",
-    description="Python library and CLI for communicating with Porsche Connect API.",
+    author="Jeremie Bartoli",
+    description=(
+        "Python library and CLI for communicating with Porsche Connect API "
+        "(fork of CJNE/pyporscheconnectapi by Johan Isacsson)."
+    ),
     long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     include_package_data=True,
-    url="https://github.com/cjne/pyporscheconnectapi",
+    url="https://github.com/bartolije/pyporscheconnectapi",
+    project_urls={
+        "Source": "https://github.com/bartolije/pyporscheconnectapi",
+        "Issues": "https://github.com/bartolije/pyporscheconnectapi/issues",
+        "Original project": "https://github.com/CJNE/pyporscheconnectapi",
+    },
     license="MIT",
     packages=["pyporscheconnectapi"],
     python_requires=">=3.12",
@@ -31,5 +38,6 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
     ],
 )
