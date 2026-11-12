@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyporscheconnectapi-bartolije"
-version = "1.0.0"
+version = "1.0.1"
 description = "Python library and CLI for communicating with Porsche Connect API (fork of CJNE/pyporscheconnectapi by Johan Isacsson)."
 readme = "README.md"
 authors = [{ name = "Jeremie Bartoli" }]
