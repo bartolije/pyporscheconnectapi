@@ -58,8 +58,7 @@ def load_credentials() -> tuple[str, str]:
     """Read email/password from the gitignored config file."""
     if not CFG.exists():
         sys.exit(
-            f"{CFG} not found.\n"
-            f"Copy .porscheconnect.cfg.example to {CFG} and fill in your credentials.",
+            f"{CFG} not found.\nCopy .porscheconnect.cfg.example to {CFG} and fill in your credentials.",
         )
     # interpolation=None: a '%' in the password is a literal, not syntax.
     cfg = configparser.ConfigParser(interpolation=None)
@@ -81,8 +80,7 @@ async def _persist_captcha(err: PorscheCaptchaRequiredError) -> None:
     out = Path("porsche_captcha.html")
     async with aiofiles.open(out, "w", encoding="utf-8") as fh:
         await fh.write(
-            '<!doctype html><html lang="en"><title>Captcha</title>'
-            f'<body><img src="{err.captcha}"/></body></html>',
+            f'<!doctype html><html lang="en"><title>Captcha</title><body><img src="{err.captcha}"/></body></html>',
         )
     checks = {
         "state": err.state,
@@ -177,8 +175,7 @@ async def run(*, auth_only: bool, resume_code: str | None) -> int:
         print(f"{INFO}groups: {', '.join(sorted(data)) or '(none)'}")
         if summary:
             print(
-                f"{INFO}charging: minSoC={summary.get('minSoC')} "
-                f"targetSoC={summary.get('targetSoC')} mode={summary.get('mode')}",
+                f"{INFO}charging: minSoC={summary.get('minSoC')} targetSoC={summary.get('targetSoC')} mode={summary.get('mode')}",
             )
         else:
             print(f"{INFO}no CHARGING_SUMMARY — targetSoC precedence not exercised by this vehicle")

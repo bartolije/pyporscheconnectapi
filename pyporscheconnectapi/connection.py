@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 import httpx
 
@@ -37,8 +38,8 @@ class Connection:
         password: str | None = None,
         captcha_code: str | None = None,
         state: str | None = None,
-        async_client=None,
-        token=None,
+        async_client: httpx.AsyncClient | None = None,
+        token: dict[str, Any] | None = None,
         leeway: int = 60,
         cookies: list[dict] | None = None,
         code_verifier: str | None = None,
@@ -69,29 +70,29 @@ class Connection:
             code_verifier=code_verifier,
         )
 
-    async def get_token(self):
+    async def get_token(self) -> OAuth2Token:
         """Return the authentication token."""
         async with self.token_lock:
             await self.oauth2_client.ensure_valid_token(self.token)
         return self.token
 
-    async def get(self, url, params=None):
+    async def get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         """Make a GET request to the Porsche Connect API."""
         return await self.request("GET", url, params=params)
 
-    async def post(self, url, data=None, json=None):
+    async def post(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a POST request to the Porsche Connect API."""
         return await self.request("POST", url, data=data, json=json)
 
-    async def put(self, url, data=None, json=None):
+    async def put(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a PUT request to the Porsche Connect API."""
         return await self.request("PUT", url, data=data, json=json)
 
-    async def delete(self, url, data=None, json=None):
+    async def delete(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a DELETE request to the Porsche Connect API."""
         return await self.request("DELETE", url, data=data, json=json)
 
-    async def request(self, method, url, **kwargs):
+    async def request(self, method: str, url: str, **kwargs: Any) -> Any:
         """Create a request to the Porsche Connect API.
 
         Transient errors (429/502/503/504, transport hiccups) are retried
@@ -153,6 +154,6 @@ class Connection:
                 msg = f"Non-JSON response (HTTP {resp.status_code}) on {url}"
                 raise PorscheExceptionError(msg, request_url=url) from exc
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the asyncClient connection."""
         await self.asyncClient.aclose()

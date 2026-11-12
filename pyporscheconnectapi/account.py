@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.vehicle import PorscheVehicle
@@ -17,7 +18,7 @@ class PorscheConnectAccount:
         self,
         username: str | None = None,
         password: str | None = None,
-        token: dict | None = None,
+        token: dict[str, Any] | None = None,
         connection: Connection | None = None,
     ) -> None:
         """Initialize the account."""

@@ -8,3 +8,10 @@ NOTE: This work is not officially supported by Porsche and functionality
 can stop working at any time without warning.
 
 """
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("pyporscheconnectapi-bartolije")
+except PackageNotFoundError:  # running from a source tree that is not installed
+    __version__ = "0+unknown"

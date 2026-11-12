@@ -7,6 +7,7 @@ import json  # only for formatting debug output
 import logging
 import re
 import uuid
+from typing import Any
 
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.remote_services import RemoteServices
@@ -41,11 +42,11 @@ class PorscheVehicle:
         self,
         connection: Connection,
         vin: str | None = None,
-        data: dict | None = None,
-        status: dict | None = None,
-        capabilities: dict | None = None,
-        trip_statistics: dict | None = None,
-        picture_locations: dict | None = None,
+        data: dict[str, Any] | None = None,
+        status: dict[str, Any] | None = None,
+        capabilities: dict[str, Any] | None = None,
+        trip_statistics: dict[str, Any] | None = None,
+        picture_locations: dict[str, Any] | None = None,
     ) -> None:
         """Initialise the Porsche Vehicle."""
         if picture_locations is None:
@@ -68,7 +69,7 @@ class PorscheVehicle:
         self.trip_statistics = trip_statistics
         self.picture_locations = picture_locations
 
-    def get_data(self) -> dict:
+    def get_data(self) -> dict[str, Any]:
         """Get all vechicle data."""
         return self.data
 
@@ -89,8 +90,12 @@ class PorscheVehicle:
 
     @property
     def has_porsche_connect(self) -> bool:
-        """Should return true if porsche connect subscription is active. Todo."""
-        return True
+        """Return False only when the API reports the Porsche Connect contract as disabled.
+
+        A vehicle that does not report the contract at all counts as
+        subscribed: it would not answer otherwise.
+        """
+        return (self.data.get("CONNECT_CONTRACT") or {}).get("isEnabled") is not False
 
     @property
     def connected(self) -> bool | None:
@@ -169,7 +174,7 @@ class PorscheVehicle:
         return _parse_porsche_datetime(timestamp) if timestamp else None
 
     @property
-    def seat_heating(self) -> dict | None:
+    def seat_heating(self) -> dict[str, Any] | None:
         """Return the climate zones the vehicle reports, with their state."""
         zones = (self.data.get("HVAC_SUMMARY") or {}).get("climateZonesEnabled")
         return zones if isinstance(zones, dict) else None
@@ -185,7 +190,7 @@ class PorscheVehicle:
         return not any(value.get("isOpen") for key, value in self.data.items() if key.startswith("OPEN_STATE_") and isinstance(value, dict))
 
     @property
-    def doors_and_lids(self) -> dict:
+    def doors_and_lids(self) -> dict[str, str]:
         """Return list of all doors and lids and their status."""
         return {
             key: "Open" if value.get("isOpen") is True else "Closed"
@@ -209,7 +214,7 @@ class PorscheVehicle:
         return max(differences) <= TIRE_PRESSURE_TOLERANCE
 
     @property
-    def tire_pressures(self) -> dict | None:
+    def tire_pressures(self) -> dict[str, Any] | None:
         """Return the tyre readings keyed frontLeftTire, frontRightTire, ...
 
         Taken from the legacy TIRE_PRESSURE measurement when it carries per-tyre
@@ -218,11 +223,7 @@ class PorscheVehicle:
         legacy = self.data.get("TIRE_PRESSURE")
         if isinstance(legacy, dict) and any(key.endswith("Tire") for key in legacy):
             return legacy
-        corners = {
-            name: self.data[key]
-            for key, name in _TIRE_CORNERS.items()
-            if isinstance(self.data.get(key), dict)
-        }
+        corners = {name: self.data[key] for key, name in _TIRE_CORNERS.items() if isinstance(self.data.get(key), dict)}
         return corners or legacy
 
     @property
