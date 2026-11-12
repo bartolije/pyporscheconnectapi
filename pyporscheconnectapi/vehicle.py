@@ -58,8 +58,8 @@ class PorscheVehicle:
             status = {}
         if data is None:
             data = {}
-        if vin is None:
-            vin = ""
+        if vin:
+            data.setdefault("vin", vin)
         self.connection = connection
         self.data = data
         self.remote_services = RemoteServices(self)
@@ -93,9 +93,9 @@ class PorscheVehicle:
         return True
 
     @property
-    def connected(self) -> bool:
-        """Returns true if the vechicle is on-line."""
-        return self.data.get("connect", "not available")
+    def connected(self) -> bool | None:
+        """Return True if the vehicle is on-line, None when the API does not say."""
+        return self.data.get("connect")
 
     @property
     def has_remote_services(self) -> bool:
@@ -182,17 +182,16 @@ class PorscheVehicle:
     @property
     def vehicle_closed(self) -> bool:
         """Return True if all doors and lids are closed."""
-        return not bool(
-            sum(
-                [self.data[key]["isOpen"] for key in self.data if key.startswith("OPEN_STATE_")],
-            ),
-        )
+        return not any(value.get("isOpen") for key, value in self.data.items() if key.startswith("OPEN_STATE_") and isinstance(value, dict))
 
     @property
     def doors_and_lids(self) -> dict:
         """Return list of all doors and lids and their status."""
-        dl = [{key: "Open" if self.data[key]["isOpen"] is True else "Closed"} for key in self.data if key.startswith("OPEN_STATE_")]
-        return dict(map(dict.popitem, dl))
+        return {
+            key: "Open" if value.get("isOpen") is True else "Closed"
+            for key, value in self.data.items()
+            if key.startswith("OPEN_STATE_") and isinstance(value, dict)
+        }
 
     @property
     def tire_pressure_status(self) -> bool:
@@ -358,34 +357,36 @@ class PorscheVehicle:
         vin = self.vin
         bdata = {}
         mdata = {}
+        disabled = set()
+        # The payloads are dumped only when someone reads them: this runs on every poll.
+        debug = _LOGGER.isEnabledFor(logging.DEBUG)
 
         if "vin" in self.status:
-            _LOGGER.debug(
-                "Vehicle status dict for %s is now: %s",
-                vin,
-                json.dumps(self.status, indent=2),
-            )
+            if debug:
+                _LOGGER.debug("Vehicle status dict for %s is now: %s", vin, json.dumps(self.status, indent=2))
 
             # Use .get via membership test: not every vehicle reports every
             # base field (e.g. systemInfo/timestamp can be absent), and a
             # missing key here used to KeyError the whole parse.
             bdata = {k: self.status[k] for k in BASE_DATA if k in self.status}
 
-            bdata["name"] = self.status["customName"] if "customName" in self.status else bdata["modelName"]
+            bdata["name"] = self.status.get("customName") or bdata.get("modelName") or self.model_name
 
-            _LOGGER.debug(
-                "Got base data for vehicle '%s': %s",
-                vin,
-                json.dumps(bdata, indent=2),
-            )
+            if debug:
+                _LOGGER.debug("Got base data for vehicle '%s': %s", vin, json.dumps(bdata, indent=2))
 
             if "measurements" in self.status:
-                tdata = [m for m in self.status["measurements"] if m["status"]["isEnabled"]]
-
-                for m in tdata:
+                for m in self.status["measurements"]:
+                    if "key" not in m:
+                        continue
+                    if not (m.get("status") or {}).get("isEnabled"):
+                        # Explicitly disabled (privacy mode, expired contract):
+                        # its last value must not live on. A measurement merely
+                        # absent from one payload keeps its value.
+                        disabled.add(m["key"])
                     # An enabled measurement can still omit "value" (e.g.
                     # transient API states); skip it rather than KeyError.
-                    if "value" in m:
+                    elif "value" in m:
                         mdata[m["key"]] = m["value"]
 
                 if "CHARGING_RATE" in mdata and not mdata.get("CHARGING_RATE", {}).get("chargingRate"):
@@ -403,7 +404,7 @@ class PorscheVehicle:
 
                 elif "CHARGING_SUMMARY" in mdata and mdata.get("CHARGING_SUMMARY", {}).get("mode") == "PROFILE":
                     # If charging profiles are enabled, get minSoC from this dict.
-                    mdata["CHARGING_SUMMARY"]["minSoC"] = mdata["CHARGING_SUMMARY"]["chargingProfile"]["minSoC"]
+                    mdata["CHARGING_SUMMARY"]["minSoC"] = (mdata["CHARGING_SUMMARY"].get("chargingProfile") or {}).get("minSoC")
 
                 if (
                     "DEPARTURES" in mdata
@@ -431,24 +432,13 @@ class PorscheVehicle:
                 elif "CHARGING_SUMMARY" in mdata:
                     mdata["CHARGING_SUMMARY"]["targetDateTimeWithOffset"] = None
 
-                _LOGGER.debug(
-                    "Got measurement data for vehicle '%s': %s",
-                    vin,
-                    json.dumps(mdata, indent=2, default=str),
-                )
+                if debug:
+                    _LOGGER.debug("Got measurement data for vehicle '%s': %s", vin, json.dumps(mdata, indent=2, default=str))
 
             else:
-                _LOGGER.debug("Measurement data missing for vehicle '%s", vin)
-                _LOGGER.debug(
-                    "Payload for current overview query was: %s",
-                    json.dumps(self.status, indent=2),
-                )
+                _LOGGER.debug("Measurement data missing for vehicle '%s'", vin)
 
         else:
-            _LOGGER.debug("Base data missing for vehicle '%s", vin)
-            _LOGGER.debug(
-                "Payload for current overview query was: %s",
-                json.dumps(self.status, indent=2),
-            )
+            _LOGGER.debug("Base data missing for vehicle '%s'", vin)
 
-        self.data = self.data | bdata | mdata
+        self.data = {k: v for k, v in self.data.items() if k not in disabled} | bdata | mdata

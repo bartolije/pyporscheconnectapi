@@ -49,6 +49,10 @@ class PorscheExceptionError(Exception):
         if self.response_body:
             self.message = f"{self.message}: {self.response_body}"
 
+    def __str__(self) -> str:
+        """Return the message: callers format the exception straight into user-facing text."""
+        return self.message or super().__str__()
+
 
 class PorscheWrongCredentialsError(PorscheExceptionError):
     """Class of exceptions for incomplete credentials."""
@@ -94,6 +98,8 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
         self.cookies = cookies
 
         super().__init__(captcha, state)
+        # Not the ~14 KB captcha data URI that args carries.
+        self.message = "CAPTCHA_REQUIRED"
 
 
 class PorscheRemoteServiceError(PorscheExceptionError):

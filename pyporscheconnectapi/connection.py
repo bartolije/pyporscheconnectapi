@@ -19,13 +19,6 @@ _LOGGER = logging.getLogger(__name__)
 HTTP_UNAUTHORIZED = 401
 
 
-async def log_request(request):
-    """Provide formatting for http logging."""
-    _LOGGER.debug("Request headers: %s", request.headers)
-    _LOGGER.debug("Request method - url: %s %s", request.method, request.url)
-    _LOGGER.debug("Request body: %s", request.content)
-
-
 class Connection:
     """Handles authentication and connecting to the Porsche Connect API.
 
@@ -111,13 +104,17 @@ class Connection:
         async with self.token_lock:
             await self.oauth2_client.ensure_valid_token(self.token)
 
+        sent_token = None
+
         async def _send() -> httpx.Response:
             # Headers rebuilt on every attempt: the access token may have
             # been refreshed by the 401 path below.
+            nonlocal sent_token
+            sent_token = self.token.access_token
             return await self.asyncClient.request(
                 method,
                 f"{API_BASE_URL}{url}",
-                headers=self.headers | {"Authorization": f"Bearer {self.token.access_token}"},
+                headers=self.headers | {"Authorization": f"Bearer {sent_token}"},
                 timeout=TIMEOUT,
                 **kwargs,
             )
@@ -137,14 +134,24 @@ class Connection:
                     # 0 as "no expiry info" (→ full re-login), whereas 1
                     # forces the cheaper refresh path first and only
                     # escalates to a full login if the refresh itself fails.
-                    self.token["expires_at"] = 1
+                    # Concurrent requests all get the same 401: only the
+                    # first one refreshes, the others reuse its new token.
+                    if self.token.access_token == sent_token:
+                        self.token["expires_at"] = 1
                     await self.oauth2_client.ensure_valid_token(self.token)
                 continue
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(resp.status_code) from exc
-            return resp.json()
+                raise PorscheExceptionError(resp.status_code, request_url=url) from exc
+            if not resp.content:
+                return None
+            try:
+                return resp.json()
+            except ValueError as exc:
+                # e.g. an HTML maintenance page served with a 200.
+                msg = f"Non-JSON response (HTTP {resp.status_code}) on {url}"
+                raise PorscheExceptionError(msg, request_url=url) from exc
 
     async def close(self):
         """Close the asyncClient connection."""

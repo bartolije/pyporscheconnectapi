@@ -799,3 +799,23 @@ async def test_debug_log_never_holds_tokens_or_code(
     assert refresh.token["access_token"] == "fake.access.token"
     for secret in ("AUTHCODE", "fake.access.token", "fake.refresh.token"):
         assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_login_transport_error_is_wrapped_and_captcha_is_cleared(email: str, password: str):
+    """A network failure mid-login is a library error, and the single-use
+    captcha code does not survive the attempt.
+    """
+    async with httpx.AsyncClient() as client:
+        conn = Connection(
+            email=email, password=password, async_client=client,
+            captcha_code="ABC123", state="ST", code_verifier="V",
+        )
+        with respx.mock() as router:
+            router.post(f"https://{AUTHORIZATION_SERVER}/u/login/identifier").mock(
+                side_effect=httpx.ConnectTimeout("slow"),
+            )
+            with pytest.raises(PorscheExceptionError, match="transport error during login"):
+                await conn.get_token()
+
+        assert conn.oauth2_client.captcha.captcha_code is None

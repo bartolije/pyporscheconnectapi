@@ -405,3 +405,44 @@ def test_last_global_update(authed_connection: Connection):
     assert v.last_global_update.isoformat() == "2026-11-06T06:30:00+00:00"
     assert PorscheVehicle(connection=authed_connection, data={}).last_global_update is None
 
+
+
+@pytest.mark.asyncio
+async def test_disabled_measurement_drops_its_last_value(
+    authed_connection: Connection, api_routes,
+):
+    """A measurement the API now reports disabled must not keep its old value;
+    one merely absent from the payload keeps it.
+    """
+    payload = {
+        "vin": "VIN_PRIV",
+        "measurements": [
+            {"key": "GPS_LOCATION", "status": {"isEnabled": False}},
+            {"key": "BROKEN"},
+        ],
+    }
+    api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_PRIV.*").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+
+    vehicle = PorscheVehicle(
+        connection=authed_connection,
+        vin="VIN_PRIV",
+        data={"GPS_LOCATION": {"location": "1.0,2.0"}, "MILEAGE": {"kilometers": 5}},
+    )
+    await vehicle.get_stored_overview()
+
+    assert vehicle.vin == "VIN_PRIV"
+    assert "GPS_LOCATION" not in vehicle.data
+    assert vehicle.data["MILEAGE"] == {"kilometers": 5}
+    assert vehicle.data["name"] == "not available"
+
+
+def test_doors_and_lids_tolerate_missing_is_open(authed_connection: Connection):
+    vehicle = PorscheVehicle(
+        connection=authed_connection,
+        data={"OPEN_STATE_LID_REAR": {"isOpen": True}, "OPEN_STATE_TOP": {}},
+    )
+    assert vehicle.vehicle_closed is False
+    assert vehicle.doors_and_lids == {"OPEN_STATE_LID_REAR": "Open", "OPEN_STATE_TOP": "Closed"}
+    assert vehicle.connected is None

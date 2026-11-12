@@ -227,6 +227,13 @@ class OAuth2Client:
 
         except httpx.HTTPStatusError as exc:
             raise PorscheExceptionError(exc.response.status_code) from exc
+        except httpx.TransportError as exc:
+            msg = f"transport error during login: {exc.__class__.__name__}"
+            raise PorscheExceptionError(msg) from exc
+        finally:
+            # A captcha code is single-use: left in place, the next full login
+            # (months later, refresh token expired) would replay a dead state.
+            self.captcha = Captcha(None, None)
 
         _LOGGER.debug("Got the authorization code.")
         return authorization_code
@@ -320,21 +327,14 @@ class OAuth2Client:
 
     def _extract_captcha_image(self, html: str):
         """Extract the captcha image from Auth0 ACUL or legacy login HTML."""
-        script_match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
-        if script_match:
-            try:
-                decoded_json = base64.b64decode(script_match.group(1)).decode("utf-8")
-                context_data = json.loads(decoded_json)
-            except (ValueError, json.JSONDecodeError, binascii.Error) as exc:
-                _LOGGER.warning("Failed to parse Auth0 ACUL context: %s", exc)
-            else:
-                captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
-                if captcha_img:
-                    _LOGGER.debug(
-                        "Parsed captcha from Auth0 ACUL context (length: %d)",
-                        len(captcha_img),
-                    )
-                    return captcha_img
+        context_data = self._extract_universal_login_context(html) or {}
+        captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
+        if captcha_img:
+            _LOGGER.debug(
+                "Parsed captcha from Auth0 ACUL context (length: %d)",
+                len(captcha_img),
+            )
+            return captcha_img
 
         soup = BeautifulSoup(html, "html.parser")
         img_tag = soup.find("img", {"alt": "captcha"})

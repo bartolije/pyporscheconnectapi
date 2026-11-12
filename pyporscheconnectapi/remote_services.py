@@ -18,6 +18,10 @@ _LOGGER = logging.getLogger(__name__)
 #: time in seconds between receiving status and polling for update
 _POLLING_DELAY = 1
 
+#: the delay grows by one second per poll up to this many seconds: a command
+#: takes seconds when the car is awake and minutes when it has to be woken up
+_POLLING_MAX_DELAY = 5
+
 #: maximum number of seconds to wait for the server to return a positive answer
 _POLLING_TIMEOUT = 240
 
@@ -223,12 +227,18 @@ class RemoteServices:
         minimum_charge_level: int | None = None,
     ):
         """Remote service for altering a charging profile."""
-        chargingprofileslist = self._vehicle.data["CHARGING_PROFILES"]["list"]
+        chargingprofileslist = (self._vehicle.data.get("CHARGING_PROFILES") or {}).get("list")
         _LOGGER.debug("Charging profile list: %s", chargingprofileslist)
+        if not chargingprofileslist:
+            msg = "The vehicle reports no charging profile"
+            raise PorscheRemoteServiceError(msg)
 
         if profile_id is None:
             # Find active charging profile
-            profile_id = next(p for p in chargingprofileslist if p["isEnabled"] is True)["id"]
+            profile_id = next((p["id"] for p in chargingprofileslist if p.get("isEnabled") is True), None)
+            if profile_id is None:
+                msg = "The vehicle has no active charging profile"
+                raise PorscheRemoteServiceError(msg)
 
         _LOGGER.debug("Active profile id: %s", profile_id)
 
@@ -313,6 +323,10 @@ class RemoteServices:
             status = await self._block_until_done(status_id)
         else:
             status = RemoteServiceStatus({"status": {"result": result_code}})
+            # Same outcome as an ERROR reached through polling.
+            if status.state == ExecutionState.ERROR:
+                msg = f"Remote service failed with state '{response}'"
+                raise PorscheRemoteServiceError(msg)
 
         await asyncio.sleep(_POLLING_DELAY)
         # A post-command status refresh is best-effort: the command itself
@@ -330,14 +344,16 @@ class RemoteServices:
     async def _block_until_done(self, status_id: str) -> RemoteServiceStatus:
         """Keep polling the server until we get a final answer.
 
-        :raises TimeoutError: if there is no final answer before _POLLING_TIMEOUT
+        :raises PorscheRemoteServiceError: on ERROR, or with no final answer before _POLLING_TIMEOUT
         """
         fail_after = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
             seconds=_POLLING_TIMEOUT,
         )
         status = None
+        delay = _POLLING_DELAY
         while datetime.datetime.now(datetime.UTC) < fail_after:
-            await asyncio.sleep(_POLLING_DELAY)
+            await asyncio.sleep(delay)
+            delay = min(delay + _POLLING_DELAY, _POLLING_MAX_DELAY)
             status = await self._get_remote_service_status(status_id)
             _LOGGER.debug("Current state of '%s' is: %s", status_id, status.state.value)
             if status.state == ExecutionState.ERROR:

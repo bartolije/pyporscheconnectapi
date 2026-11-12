@@ -319,14 +319,10 @@ async def test_immediate_performed_response_yields_performed_state(
 
 
 @pytest.mark.asyncio
-async def test_immediate_error_response_yields_error_state(
+async def test_immediate_error_response_raises(
     authed_connection: Connection, api_routes, monkeypatch,
 ):
-    """An immediate ERROR result is reported as ExecutionState.ERROR.
-
-    Same regression class as the PERFORMED case — making sure we don't
-    flatten distinct outcomes to UNKNOWN.
-    """
+    """An immediate ERROR result raises, like an ERROR reached through polling."""
     await _drain_polling_sleep(monkeypatch)
     api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
         return_value=httpx.Response(
@@ -336,8 +332,22 @@ async def test_immediate_error_response_yields_error_state(
     )
 
     vehicle = _make_vehicle(authed_connection)
-    status = await vehicle.remote_services.flash_indicators()
-    assert status.state == ExecutionState.ERROR
+    with pytest.raises(PorscheRemoteServiceError, match="ERROR"):
+        await vehicle.remote_services.flash_indicators()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"CHARGING_PROFILES": {"list": [{"id": 1, "isEnabled": False, "minSoc": 40}]}}],
+)
+async def test_update_charging_profile_without_usable_profile_raises(
+    authed_connection: Connection, api_routes, data,
+):
+    """No profile list, or no active profile: a library error, not KeyError/RuntimeError."""
+    vehicle = _make_vehicle(authed_connection, **data)
+    with pytest.raises(PorscheRemoteServiceError, match="charging profile"):
+        await vehicle.remote_services.update_charging_profile(minimum_charge_level=80)
 
 
 @pytest.mark.asyncio
