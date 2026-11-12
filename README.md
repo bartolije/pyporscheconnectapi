@@ -151,9 +151,19 @@ Auth0 session secret.
 
 ### Transient error handling
 
-Requests to the Porsche API — including the OAuth2 token endpoints — retry
-transparently on transient failures (HTTP 429/502/503/504 and network
-errors) with capped exponential backoff, honouring `Retry-After`.
+Reads from the Porsche API, and the OAuth2 token endpoints, are retried on
+transient failures (HTTP 429/502/503/504 and network errors) with capped
+exponential backoff, honouring `Retry-After`.
+
+A command (lock, unlock, climatisation, charging, honk and flash) is sent
+**once**: a timeout does not say whether it reached the car, so it is never
+replayed. It fails with a `PorscheExceptionError` and the caller decides.
+
+### HTTP client
+
+Pass your own `httpx.AsyncClient` (or the `httpx2` client Home Assistant
+2026.11 gives integrations) as `async_client=`. `Connection.close()` leaves a
+client you passed open; it only closes one the connection created itself.
 
 ### Errors
 
@@ -162,6 +172,13 @@ Every failure the library reports is a `PorscheExceptionError` (or a subclass:
 `PorscheCaptchaRequiredError`, `PorscheRemoteServiceError`). `str(exc)` is a
 short readable message, safe to show to a user: it never contains a token, a
 password or a PIN.
+
+### Debug logs
+
+With the `pyporscheconnectapi` logger at `DEBUG`, the payload dumps leave out
+the position of the car, its pairing codes and its full VIN, and no log line
+holds a token, a password, a PIN or the unlock hash. Other debug lines still
+name the VIN: replace it before posting a log.
 
 ### Typing
 
@@ -176,8 +193,10 @@ pip install -r requirements_dev.txt -e ".[cli]"
 ruff check && ruff format --check && mypy && pytest
 ```
 
-CI runs the same four checks on every pull request, builds the wheel and
-installs it without the CLI extra.
+CI runs the same four checks on every pull request, on Python 3.12 to 3.15,
+with a 95 % coverage floor (97 % today), then builds the wheel and installs it
+without the CLI extra. A release is published to PyPI by trusted publishing
+after the same checks, only if the tag matches the package version.
 
 ### Live smoke test (local only)
 

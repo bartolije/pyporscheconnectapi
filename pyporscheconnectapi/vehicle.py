@@ -28,6 +28,31 @@ _TIRE_CORNERS = {
 }
 
 
+# Debug logs get pasted into issues: these never go in them.
+_PRIVATE_MEASUREMENTS = frozenset({"GPS_LOCATION", "PAIRING_CODE", "BLEID_DDADATA"})
+_REDACTED = "**REDACTED**"
+
+
+def _for_log(payload: Any, vin: str) -> str:
+    """Dump a payload for the debug log without the position, the pairing codes or the VIN."""
+
+    def scrub(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if obj.get("key") in _PRIVATE_MEASUREMENTS:
+                return obj | {"value": _REDACTED}
+            return {k: _REDACTED if k in _PRIVATE_MEASUREMENTS else scrub(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [scrub(item) for item in obj]
+        return obj
+
+    dump = json.dumps(scrub(payload), indent=2, default=str)
+    return dump.replace(vin, _mask_vin(vin)) if vin else dump
+
+
+def _mask_vin(vin: str) -> str:
+    return f"{vin[:3]}…{vin[-4:]}"
+
+
 def _parse_porsche_datetime(datetime_str: str) -> dt.datetime:
     """Parse Porsche API timestamps, including UTC timestamps with a trailing Z."""
     if datetime_str.endswith("Z"):
@@ -365,7 +390,7 @@ class PorscheVehicle:
 
         if "vin" in self.status:
             if debug:
-                _LOGGER.debug("Vehicle status dict for %s is now: %s", vin, json.dumps(self.status, indent=2))
+                _LOGGER.debug("Vehicle status dict for %s is now: %s", _mask_vin(vin), _for_log(self.status, vin))
 
             # Use .get via membership test: not every vehicle reports every
             # base field (e.g. systemInfo/timestamp can be absent), and a
@@ -375,7 +400,7 @@ class PorscheVehicle:
             bdata["name"] = self.status.get("customName") or bdata.get("modelName") or self.model_name
 
             if debug:
-                _LOGGER.debug("Got base data for vehicle '%s': %s", vin, json.dumps(bdata, indent=2))
+                _LOGGER.debug("Got base data for vehicle '%s': %s", _mask_vin(vin), _for_log(bdata, vin))
 
             if "measurements" in self.status:
                 for m in self.status["measurements"]:
@@ -435,7 +460,7 @@ class PorscheVehicle:
                     mdata["CHARGING_SUMMARY"]["targetDateTimeWithOffset"] = None
 
                 if debug:
-                    _LOGGER.debug("Got measurement data for vehicle '%s': %s", vin, json.dumps(mdata, indent=2, default=str))
+                    _LOGGER.debug("Got measurement data for vehicle '%s': %s", _mask_vin(vin), _for_log(mdata, vin))
 
             else:
                 _LOGGER.debug("Measurement data missing for vehicle '%s'", vin)

@@ -37,7 +37,7 @@ class PorscheConnectAccount:
             vehicle_list = await self.connection.get("/connect/v1/vehicles")
 
             for vehicle in vehicle_list:
-                _LOGGER.debug("Got vehicle %s", vehicle)
+                _LOGGER.debug("Got vehicle %s", vehicle.get("modelName"))
                 v = PorscheVehicle(
                     vin=vehicle["vin"],
                     data=vehicle,

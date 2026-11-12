@@ -223,6 +223,11 @@ class OAuth2Client:
                 _LOGGER.debug(
                     "No existing auth0 session, running through identifier first flow.",
                 )
+                if "state" not in params:
+                    # The login page was not reached: Auth0 says why in the redirect.
+                    reason = (params.get("error_description") or params.get("error") or ["no login state"])[0]
+                    msg = f"Login refused: {reason}"
+                    raise PorscheExceptionError(msg)
                 state = params["state"][0]
 
             resume_path = await self.login_with_identifier(state)

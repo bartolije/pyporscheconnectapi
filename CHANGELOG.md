@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.1
+
+### Fixed
+
+- `Connection.close()` closed an HTTP client the caller had passed in. It now
+  only closes a client the connection created itself.
+- An empty answer to a read (vehicle list, overview, pictures) raised
+  `TypeError`. It is now a `PorscheExceptionError`, like every other failure.
+- A login that Porsche refuses before the login page raised `KeyError('state')`.
+  It is now a `PorscheExceptionError` with Porsche's reason.
+- `unlock_vehicle` raised `AttributeError` on an empty answer to the PIN
+  challenge.
+
+### Changed
+
+- Debug logs no longer hold the position of the car, its pairing codes or its
+  full VIN in the payload dumps, and error messages name the request path
+  without the list of measurements.
+
 ## 1.0.0
 
 First stable release of this fork. One release for everything below.

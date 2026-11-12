@@ -100,11 +100,19 @@ async def test_token_refresh_path_when_expired(email: str, password: str):
 @pytest.mark.asyncio
 async def test_close_is_idempotent(email: str, password: str):
     """Calling Connection.close() twice doesn't raise."""
+    conn = Connection(email=email, password=password)
+    await conn.close()
+    # Second close must not raise.
+    await conn.close()
+    assert conn.asyncClient.is_closed
+
+
+@pytest.mark.asyncio
+async def test_close_leaves_a_client_the_caller_passed_open(email: str, password: str):
+    """Home Assistant shares its client: closing it would break the other users."""
     async with httpx.AsyncClient() as client:
-        conn = Connection(email=email, password=password, async_client=client)
-        await conn.close()
-        # Second close must not raise.
-        await conn.close()
+        await Connection(email=email, password=password, async_client=client).close()
+        assert not client.is_closed
 
 
 @pytest.mark.asyncio
@@ -377,3 +385,23 @@ async def test_command_is_not_sent_again_after_a_transient_failure(authed_connec
             await authed_connection.post("/connect/v1/vehicles/VIN/commands", json={"key": "HONK_FLASH"})
 
     assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_answer_to_a_read_is_a_library_error(authed_connection: Connection):
+    with respx.mock(base_url=API_BASE_URL) as router:
+        router.get("/connect/v1/vehicles").mock(return_value=httpx.Response(204))
+
+        with pytest.raises(PorscheExceptionError, match="Empty response on /connect/v1/vehicles"):
+            await authed_connection.get("/connect/v1/vehicles?mf=A&mf=B")
+
+
+@pytest.mark.asyncio
+async def test_login_refused_before_the_login_page_gives_the_reason(connection: Connection):
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"https://{AUTHORIZATION_SERVER}/authorize").mock(
+            return_value=_redirect(f"{REDIRECT_URI}?error=unauthorized_client&error_description=Callback+URL+mismatch"),
+        )
+
+        with pytest.raises(PorscheExceptionError, match="Callback URL mismatch"):
+            await connection.get_token()
