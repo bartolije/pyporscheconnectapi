@@ -9,6 +9,8 @@
   186611, was still accepted.
 - A rejected token (401) is logged at debug level, not as a warning on every
   attempt.
+- `porschecli token` shows the session (validity, scope) with the tokens
+  masked. Since 1.0.0 it printed them in full; they stay in the session file.
 
 ### Fixed
 

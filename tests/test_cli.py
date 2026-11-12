@@ -140,7 +140,11 @@ def cli_env(tmp_path, monkeypatch):
 async def test_main_token_command_prints_and_saves_token(cli_env, tmp_path, capsys):
     await cli.main(cli_env(command="token"))
 
-    assert "access_token" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "access_token" in out
+    # The secrets are saved, never printed.
+    assert "'A'" not in out
+    assert "***" in out
     saved = json.loads((tmp_path / "session.json").read_text())
     assert saved == {"access_token": "A"}
 
