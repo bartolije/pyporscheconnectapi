@@ -1,4 +1,5 @@
 """Tests for pyporscheconnectapi.account.PorscheConnectAccount."""
+
 from __future__ import annotations
 
 import httpx
@@ -21,7 +22,8 @@ def api_routes():
 
 @pytest.mark.asyncio
 async def test_get_vehicles_parses_payload_into_porsche_vehicles(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """`get_vehicles()` calls /connect/v1/vehicles and parses each entry."""
     payload = [
@@ -43,7 +45,8 @@ async def test_get_vehicles_parses_payload_into_porsche_vehicles(
 
 @pytest.mark.asyncio
 async def test_get_vehicles_caches_after_first_call(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """A second call doesn't refetch unless force_init=True."""
     route = api_routes.get("/connect/v1/vehicles").mock(
@@ -62,7 +65,8 @@ async def test_get_vehicles_caches_after_first_call(
 
 @pytest.mark.asyncio
 async def test_get_vehicle_resolves_specific_vin(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """`get_vehicle(vin)` returns the matching PorscheVehicle (or None)."""
     api_routes.get("/connect/v1/vehicles").mock(

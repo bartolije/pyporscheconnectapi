@@ -1,13 +1,16 @@
 """Tests for pyporscheconnectapi.vehicle.PorscheVehicle."""
+
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
+import pyporscheconnectapi
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.const import API_BASE_URL
 from pyporscheconnectapi.exceptions import PorscheExceptionError
@@ -34,7 +37,9 @@ def api_routes():
 
 @pytest.mark.asyncio
 async def test_get_stored_overview_populates_vehicle_data(
-    authed_connection: Connection, api_routes, overview_payload,
+    authed_connection: Connection,
+    api_routes,
+    overview_payload,
 ):
     """`get_stored_overview()` parses the measurements list into vehicle.data."""
     api_routes.get(url__regex=r"/connect/v1/vehicles/WP0ZZZY1ZZS000001.*").mock(
@@ -60,12 +65,13 @@ async def test_get_stored_overview_populates_vehicle_data(
 
 @pytest.mark.asyncio
 async def test_get_picture_locations_populates_dict(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """`get_picture_locations()` indexes pictures by view label."""
     pictures = [
         {"view": "exterior_front", "url": "https://img/ext-front.jpg"},
-        {"view": "exterior_rear",  "url": "https://img/ext-rear.jpg"},
+        {"view": "exterior_rear", "url": "https://img/ext-rear.jpg"},
     ]
     api_routes.get("/connect/v1/vehicles/VIN1/pictures").mock(
         return_value=httpx.Response(200, json=pictures),
@@ -76,7 +82,7 @@ async def test_get_picture_locations_populates_dict(
 
     assert vehicle.picture_locations == {
         "exterior_front": "https://img/ext-front.jpg",
-        "exterior_rear":  "https://img/ext-rear.jpg",
+        "exterior_rear": "https://img/ext-rear.jpg",
     }
 
 
@@ -106,8 +112,8 @@ def test_vin_and_model_name_from_data(authed_connection: Connection):
 @pytest.mark.parametrize(
     ("engine", "expected_electric", "expected_ice"),
     [
-        ("BEV",        True,  False),
-        ("PHEV",       True,  True),
+        ("BEV", True, False),
+        ("PHEV", True, True),
         ("COMBUSTION", False, True),
     ],
 )
@@ -217,7 +223,9 @@ def combustion_payload() -> dict:
 
 @pytest.mark.asyncio
 async def test_combustion_overview_exposes_ice_properties(
-    authed_connection: Connection, api_routes, combustion_payload,
+    authed_connection: Connection,
+    api_routes,
+    combustion_payload,
 ):
     """ICE/common measurements are parsed into dedicated properties."""
     api_routes.get(url__regex=r"/connect/v1/vehicles/WP0ZZZ98ZZS000002.*").mock(
@@ -265,7 +273,8 @@ def test_service_intervals(authed_connection: Connection):
 
 @pytest.mark.asyncio
 async def test_overview_with_missing_base_fields_does_not_crash(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """A payload lacking systemInfo/timestamp must not KeyError the parse."""
     payload = {
@@ -282,7 +291,8 @@ async def test_overview_with_missing_base_fields_does_not_crash(
     )
 
     vehicle = PorscheVehicle(
-        connection=authed_connection, data={"vin": "WP0ZZZ98ZZS000002"},
+        connection=authed_connection,
+        data={"vin": "WP0ZZZ98ZZS000002"},
     )
     await vehicle.get_stored_overview()
 
@@ -292,7 +302,8 @@ async def test_overview_with_missing_base_fields_does_not_crash(
 
 @pytest.mark.asyncio
 async def test_enabled_measurement_without_value_is_skipped(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """An enabled measurement that omits 'value' must not KeyError."""
     payload = {
@@ -317,7 +328,8 @@ async def test_enabled_measurement_without_value_is_skipped(
 def test_tire_pressure_status_handles_empty(authed_connection: Connection):
     """tire_pressure_status returns True (OK) when no per-tire readings exist."""
     v_empty = PorscheVehicle(
-        connection=authed_connection, data={"TIRE_PRESSURE": {"lastModified": "x"}},
+        connection=authed_connection,
+        data={"TIRE_PRESSURE": {"lastModified": "x"}},
     )
     assert v_empty.tire_pressure_status is True
 
@@ -336,7 +348,8 @@ def test_tire_pressure_status_handles_empty(authed_connection: Connection):
 
 @pytest.mark.asyncio
 async def test_get_stored_overview_propagates_api_error(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """get_stored_overview now re-raises PorscheExceptionError (no longer swallowed)."""
     api_routes.get(url__regex=r"/connect/v1/vehicles/VINERR.*").mock(
@@ -406,10 +419,10 @@ def test_last_global_update(authed_connection: Connection):
     assert PorscheVehicle(connection=authed_connection, data={}).last_global_update is None
 
 
-
 @pytest.mark.asyncio
 async def test_disabled_measurement_drops_its_last_value(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """A measurement the API now reports disabled must not keep its old value;
     one merely absent from the payload keeps it.
@@ -446,3 +459,148 @@ def test_doors_and_lids_tolerate_missing_is_open(authed_connection: Connection):
     assert vehicle.vehicle_closed is False
     assert vehicle.doors_and_lids == {"OPEN_STATE_LID_REAR": "Open", "OPEN_STATE_TOP": "Closed"}
     assert vehicle.connected is None
+
+
+# -- Charging data normalisation -------------------------------------------
+
+
+def _measurement(key: str, value: dict) -> dict:
+    return {"key": key, "status": {"isEnabled": True}, "value": value}
+
+
+@pytest.mark.parametrize(
+    ("measurements", "expected_min_soc"),
+    [
+        # The active target SoC wins over everything else.
+        ({"CHARGING_SUMMARY": {"mode": "PROFILE", "targetSoC": 85, "chargingProfile": {"minSoC": 40}}}, 85),
+        ({"CHARGING_SUMMARY": {"mode": "PROFILE", "chargingProfile": {"minSoC": 40}}}, 40),
+        # PROFILE mode without the profile: no value, no KeyError.
+        ({"CHARGING_SUMMARY": {"mode": "PROFILE"}}, None),
+        ({"CHARGING_SUMMARY": {"mode": "DIRECT"}, "DEPARTURES": {"list": []}, "CHARGING_SETTINGS": {"targetSoc": 70}}, 70),
+        # Direct charging reports no minSoC: it charges to full.
+        ({"CHARGING_SUMMARY": {"mode": "DIRECT"}}, 100),
+    ],
+)
+async def test_charging_target_precedence(
+    authed_connection: Connection,
+    api_routes,
+    measurements,
+    expected_min_soc,
+):
+    payload = {
+        "vin": "VIN_PHEV",
+        "modelName": "Cayenne E-Hybrid",
+        "modelType": {"engine": "PHEV", "year": "2025"},
+        "measurements": [_measurement(k, v) for k, v in measurements.items()],
+    }
+    api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_PHEV.*").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, vin="VIN_PHEV")
+
+    await vehicle.get_stored_overview()
+
+    assert vehicle.charging_target == expected_min_soc
+    assert vehicle.has_electric_drivetrain
+    assert vehicle.has_ice_drivetrain
+    assert vehicle.main_battery_level == 0  # only reported for a pure BEV
+    assert vehicle.model_year == "2025"
+    assert "PHEV" in repr(vehicle)
+
+
+async def test_charging_rate_and_target_time(authed_connection: Connection, api_routes):
+    payload = {
+        "vin": "VIN_BEV",
+        "modelName": "Taycan",
+        "measurements": [
+            _measurement("CHARGING_RATE", {"chargingRate": 2.5, "chargingPower": 11}),
+            _measurement("CHARGING_SUMMARY", {"mode": "DIRECT", "targetDateTimeWithOffset": "2026-01-02T03:04:00Z"}),
+            _measurement("GPS_LOCATION", {"location": "48.85,2.35", "direction": 90, "lastModified": "2026-01-01T00:00:00Z"}),
+        ],
+    }
+    route = api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_BEV.*").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, vin="VIN_BEV")
+
+    await vehicle.get_current_overview()
+
+    assert "wakeUpJob=" in str(route.calls.last.request.url)
+    assert vehicle.data["CHARGING_RATE"]["chargingRate-kph"] == 150
+    assert vehicle.data["CHARGING_SUMMARY"]["targetDateTimeWithOffset"].year == 2026
+    assert vehicle.direct_charge_on
+    assert vehicle.location == (48.85, 2.35, 90)
+    assert vehicle.location_updated_at is not None
+    assert vehicle.get_data() is vehicle.data
+
+
+async def test_idle_charging_rate_is_zeroed(authed_connection: Connection, api_routes):
+    payload = {
+        "vin": "VIN_IDLE",
+        "measurements": [
+            _measurement("CHARGING_RATE", {"chargingRate": 0}),
+            _measurement("CHARGING_SUMMARY", {"mode": "DIRECT"}),
+        ],
+    }
+    api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_IDLE.*").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, vin="VIN_IDLE")
+
+    await vehicle.get_stored_overview()
+
+    assert vehicle.data["CHARGING_RATE"] == {"chargingRate": 0, "chargingRate-kph": 0, "chargingPower": 0}
+    assert vehicle.data["CHARGING_SUMMARY"]["targetDateTimeWithOffset"] is None
+    assert vehicle.location == (None, None, None)
+    assert vehicle.location_updated_at is None
+
+
+@pytest.mark.parametrize("payload", [{}, {"vin": "VIN_BARE"}])
+async def test_overview_without_base_data_or_measurements_keeps_data(
+    authed_connection: Connection,
+    api_routes,
+    payload,
+):
+    api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_BARE.*").mock(
+        return_value=httpx.Response(200, json=payload),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, vin="VIN_BARE", data={"MILEAGE": {"kilometers": 5}})
+
+    await vehicle.get_stored_overview()
+
+    assert vehicle.mileage == 5
+
+
+async def test_capabilities_and_trip_statistics_are_stored(authed_connection: Connection, api_routes):
+    route = api_routes.get(url__regex=r"/connect/v1/vehicles/VIN_CAP.*").mock(
+        return_value=httpx.Response(200, json={"vin": "VIN_CAP"}),
+    )
+    vehicle = PorscheVehicle(connection=authed_connection, vin="VIN_CAP")
+
+    await vehicle.get_capabilities()
+    assert "cf=LOCK" in str(route.calls.last.request.url)
+    await vehicle.get_trip_statistics()
+    assert "mf=TRIP_STATISTICS_CYCLIC" in str(route.calls.last.request.url)
+
+    assert vehicle.capabilities == {"vin": "VIN_CAP"}
+    assert vehicle.trip_statistics == {"vin": "VIN_CAP"}
+
+
+@pytest.mark.parametrize(
+    ("contract", "expected"),
+    [(None, True), ({"isEnabled": True, "until": "2030-06-03T12:32:04Z"}, True), ({"isEnabled": False}, False)],
+)
+def test_has_porsche_connect_follows_the_contract(authed_connection: Connection, contract, expected):
+    data = {} if contract is None else {"CONNECT_CONTRACT": contract}
+    assert PorscheVehicle(connection=authed_connection, data=data).has_porsche_connect is expected
+
+
+def test_vehicle_locked_and_closed_defaults(authed_connection: Connection):
+    vehicle = PorscheVehicle(connection=authed_connection, data={"LOCK_STATE_VEHICLE": {"isLocked": True}})
+    assert vehicle.vehicle_locked
+    assert vehicle.vehicle_closed
+
+
+def test_package_version_matches_pyproject():
+    project = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())["project"]
+    assert pyporscheconnectapi.__version__ == project["version"]

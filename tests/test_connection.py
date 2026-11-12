@@ -1,4 +1,5 @@
 """Tests for pyporscheconnectapi.connection.Connection."""
+
 from __future__ import annotations
 
 import asyncio
@@ -72,7 +73,10 @@ async def test_token_refresh_path_when_expired(email: str, password: str):
 
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client, token=expired_token,
+            email=email,
+            password=password,
+            async_client=client,
+            token=expired_token,
         )
         try:
             with respx.mock(assert_all_called=False) as router:
@@ -332,3 +336,31 @@ def test_exception_str_carries_the_message():
     assert str(PorscheExceptionError(503)) == "SERVICE_MAINTENANCE"
     assert str(PorscheExceptionError("boom")) == "boom"
     assert str(PorscheExceptionError(403, response_body="denied")) == "UNKNOWN_ERROR_403: denied"
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (400, "BAD_REQUEST"),
+        (401, "UNAUTHORIZED"),
+        (404, "NOT_FOUND"),
+        (405, "MOBILE_ACCESS_DISABLED"),
+        (408, "VEHICLE_UNAVAILABLE"),
+        (423, "ACCOUNT_LOCKED"),
+        (429, "TOO_MANY_REQUESTS"),
+        (500, "SERVER_ERROR"),
+        (504, "UPSTREAM_TIMEOUT"),
+        (418, "UNKNOWN_ERROR_418"),
+    ],
+)
+def test_exception_message_per_http_code(code, message):
+    exc = PorscheExceptionError(code)
+    assert (exc.code, str(exc)) == (code, message)
+
+
+@pytest.mark.asyncio
+async def test_put_sends_a_put(authed_connection: Connection):
+    with respx.mock() as router:
+        route = router.put(f"{API_BASE_URL}/x").mock(return_value=httpx.Response(200, json={"ok": True}))
+        assert await authed_connection.put("/x", json={"a": 1}) == {"ok": True}
+    assert route.called

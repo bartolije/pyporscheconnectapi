@@ -1,4 +1,5 @@
 """Round-trip tests for the Auth0 session cookie serialisation."""
+
 from __future__ import annotations
 
 import json

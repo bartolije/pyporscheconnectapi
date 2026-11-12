@@ -1,4 +1,5 @@
 """Shared pytest fixtures."""
+
 from __future__ import annotations
 
 import time
@@ -49,7 +50,10 @@ async def authed_connection(email: str, password: str):
     }
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client, token=token,
+            email=email,
+            password=password,
+            async_client=client,
+            token=token,
         )
         try:
             yield conn

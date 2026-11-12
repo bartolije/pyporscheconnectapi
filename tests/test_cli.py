@@ -1,9 +1,11 @@
 """CLI tests: token cache, captcha prompt, command dispatch, arg parsing."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -252,3 +254,62 @@ async def test_main_saves_token_and_closes_when_the_command_fails(cli_env, tmp_p
         await cli.main(cli_env(command="list"))
 
     assert json.loads((tmp_path / "session.json").read_text()) == {"access_token": "A"}
+
+
+# -- Every vehicle command --------------------------------------------------
+
+
+class _AnyVehicle:
+    """Answers every read with a value and every get_* call with a no-op."""
+
+    def __getattr__(self, name: str):
+        if name.startswith("get_"):
+
+            async def _noop():
+                return None
+
+            return _noop
+        return f"<{name}>"
+
+
+class _AnyRemoteServices:
+    def __init__(self, _vehicle):
+        pass
+
+    def __getattr__(self, name: str):
+        async def _command(*_args, **_kwargs):
+            return SimpleNamespace(status="PERFORMED")
+
+        return _command
+
+
+@pytest.mark.parametrize("command", sorted(cli.vehicle_commands))
+async def test_every_declared_vehicle_command_runs(command, monkeypatch):
+    """Each command the parser offers has a function, and it returns something."""
+    monkeypatch.setattr(cli, "RemoteServices", _AnyRemoteServices)
+    args = argparse.Namespace(profileid=None, minimumchargelevel=80, target_soc=80, pin="1234")
+
+    result = await getattr(cli, command)(_AnyVehicle(), args)
+
+    assert result is not None
+
+
+def test_obj_to_json_handles_dates_only():
+    assert cli.obj_to_json(datetime(2026, 1, 2, tzinfo=UTC)) == "2026-01-02T00:00:00+00:00"
+    with pytest.raises(TypeError):
+        cli.obj_to_json(object())
+
+
+async def test_async_input_strips(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "  code  ")
+    assert await cli.async_input("? ") == "code"
+    assert await cli.async_input("? ", strip=False) == "  code  "
+
+
+async def test_main_without_vehicles_says_so(cli_env, capsys):
+    _FakeAccount.vehicles = []
+
+    await cli.main(cli_env(command="list", debug=True))
+
+    assert "No vehicles found" in capsys.readouterr().out
+    cli.logging.root.setLevel(cli.logging.WARNING)

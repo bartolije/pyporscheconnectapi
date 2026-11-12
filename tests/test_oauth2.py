@@ -1,4 +1,5 @@
 """OAuth2 flow tests against a respx-mocked Porsche identity server."""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,18 +23,13 @@ from pyporscheconnectapi.exceptions import (
     PorscheLoginThrottledError,
     PorscheWrongCredentialsError,
 )
-from pyporscheconnectapi.oauth2 import Captcha
+from pyporscheconnectapi.oauth2 import Captcha, OAuth2Token
 
 # A minimal SVG payload — the wire format the lib emits in
 # `PorscheCaptchaRequiredError.captcha`.
 SAMPLE_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="150" height="50"/>'
-SAMPLE_CAPTCHA_DATA_URI = (
-    "data:image/svg+xml;base64," + base64.b64encode(SAMPLE_SVG).decode()
-)
-SAMPLE_HTML_WITH_CAPTCHA = (
-    '<html><body><div class="captcha"><img alt="captcha" '
-    f'src="{SAMPLE_CAPTCHA_DATA_URI}"/></div></body></html>'
-)
+SAMPLE_CAPTCHA_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(SAMPLE_SVG).decode()
+SAMPLE_HTML_WITH_CAPTCHA = f'<html><body><div class="captcha"><img alt="captcha" src="{SAMPLE_CAPTCHA_DATA_URI}"/></div></body></html>'
 
 TOKEN_PAYLOAD = {
     "access_token": "fake.access.token",
@@ -51,14 +47,16 @@ def _redirect(location: str, status: int = 302) -> httpx.Response:
 def routes():
     """Reset respx for every test, intercepting only Porsche identity hosts."""
     with respx.mock(
-        base_url=f"https://{AUTHORIZATION_SERVER}", assert_all_called=False,
+        base_url=f"https://{AUTHORIZATION_SERVER}",
+        assert_all_called=False,
     ) as router:
         yield router
 
 
 @pytest.mark.asyncio
 async def test_existing_auth0_session_returns_code_directly(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """When /authorize already has a session, no identifier flow runs."""
     routes.get("/authorize").mock(
@@ -72,33 +70,31 @@ async def test_existing_auth0_session_returns_code_directly(
     assert connection.token["access_token"] == "fake.access.token"
 
     # identifier-first endpoints must NOT have been called
-    assert not any(
-        call.request.url.path.startswith("/u/login/")
-        for call in routes.calls
-    )
+    assert not any(call.request.url.path.startswith("/u/login/") for call in routes.calls)
 
 
 @pytest.mark.asyncio
 async def test_refused_authorize_reports_status_and_reason(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A refused /authorize says why instead of a bare failure (issue #27)."""
     routes.get("/authorize").mock(
         return_value=httpx.Response(
-            403, text='<p class="error-message">Callback URL mismatch.</p>',
+            403,
+            text='<p class="error-message">Callback URL mismatch.</p>',
         ),
     )
 
     with pytest.raises(PorscheExceptionError) as excinfo:
         await connection.get_token()
-    assert excinfo.value.message == (
-        "Could not fetch authorization code: HTTP 403 (Callback URL mismatch.)"
-    )
+    assert excinfo.value.message == ("Could not fetch authorization code: HTTP 403 (Callback URL mismatch.)")
 
 
 @pytest.mark.asyncio
 async def test_identifier_first_flow_with_relative_resume_path(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """Full happy path: no session → identifier → password → resume → code."""
     routes.get("/authorize").mock(
@@ -123,7 +119,8 @@ async def test_identifier_first_flow_with_relative_resume_path(
 
 @pytest.mark.asyncio
 async def test_identifier_first_flow_with_absolute_resume_url(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """Regression: some accounts get an absolute Location from /u/login/password.
 
@@ -158,7 +155,8 @@ async def test_identifier_first_flow_with_absolute_resume_url(
 
 @pytest.mark.asyncio
 async def test_captcha_required_raises_with_payload_and_state(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A 400 on /u/login/identifier with a captcha SVG bubbles up cleanly."""
     routes.get("/authorize").mock(
@@ -253,7 +251,8 @@ async def test_captcha_retry_completes_login(connection: Connection, routes):
 
 @pytest.mark.asyncio
 async def test_password_step_without_location_raises(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A non-redirect password response (e.g. an MFA interstitial) raises a
     clean PorscheExceptionError instead of KeyError-ing on a missing Location.
@@ -298,7 +297,8 @@ def _expired_token() -> dict:
 
 @pytest.mark.asyncio
 async def test_fetch_access_token_retries_transient_503(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A transient 503 on the code→token exchange is retried, not fatal."""
     routes.get("/authorize").mock(
@@ -331,7 +331,10 @@ async def test_refresh_token_retries_on_429(email: str, password: str, routes):
 
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client, token=_expired_token(),
+            email=email,
+            password=password,
+            async_client=client,
+            token=_expired_token(),
         )
         await conn.get_token()
 
@@ -343,7 +346,8 @@ async def test_refresh_token_retries_on_429(email: str, password: str, routes):
 
 @pytest.mark.asyncio
 async def test_fetch_access_token_gives_up_after_retries(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A persistent 503 on the token endpoint fails after the retry budget."""
     routes.get("/authorize").mock(
@@ -379,7 +383,10 @@ async def test_refresh_token_403_is_not_retried(email: str, password: str, route
 
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client, token=_expired_token(),
+            email=email,
+            password=password,
+            async_client=client,
+            token=_expired_token(),
         )
         await conn.get_token()
 
@@ -390,7 +397,8 @@ async def test_refresh_token_403_is_not_retried(email: str, password: str, route
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_instant_retry_sleep")
 async def test_token_endpoint_retries_transport_error(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """A network hiccup on the token endpoint is retried with backoff."""
     routes.get("/authorize").mock(
@@ -415,11 +423,14 @@ async def test_token_endpoint_retries_transport_error(
 
 @pytest.mark.asyncio
 async def test_resume_polls_until_code_is_ready(
-    connection: Connection, routes, monkeypatch,
+    connection: Connection,
+    routes,
+    monkeypatch,
 ):
     """Auth0 not ready on the first resume attempts → poll until the 302."""
     monkeypatch.setattr(
-        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0, 0.0),
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS",
+        (0.0, 0.0, 0.0),
     )
     routes.get("/authorize").mock(
         return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
@@ -448,11 +459,14 @@ async def test_resume_polls_until_code_is_ready(
 
 @pytest.mark.asyncio
 async def test_resume_without_code_raises_explicit_error(
-    connection: Connection, routes, monkeypatch,
+    connection: Connection,
+    routes,
+    monkeypatch,
 ):
     """The resume never yields a code → explicit error, not a silent None."""
     monkeypatch.setattr(
-        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0),
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS",
+        (0.0, 0.0),
     )
     routes.get("/authorize").mock(
         return_value=_redirect(f"{REDIRECT_URI}?state=ST"),
@@ -574,14 +588,8 @@ async def test_captcha_resume_in_fresh_client(email: str, password: str, routes)
 
 # Auth0 renders the refusal reason into the returned HTML; a wrong password,
 # a throttled login and a blocked account all come back as HTTP 400.
-WRONG_PASSWORD_HTML = (
-    '<html><body><span id="error-element-password">'
-    "Wrong email or password.</span></body></html>"
-)
-THROTTLED_HTML = (
-    '<html><body><div role="alert">Your account has been blocked after '
-    "multiple consecutive login attempts.</div></body></html>"
-)
+WRONG_PASSWORD_HTML = '<html><body><span id="error-element-password">Wrong email or password.</span></body></html>'
+THROTTLED_HTML = '<html><body><div role="alert">Your account has been blocked after multiple consecutive login attempts.</div></body></html>'
 
 
 async def _password_step_response(connection: Connection, routes, html: str):
@@ -615,7 +623,8 @@ async def test_throttled_login_is_distinguishable(connection: Connection, routes
 
 @pytest.mark.asyncio
 async def test_unparseable_400_falls_back_to_generic_message(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """No reason in the page → the original generic message, not a crash."""
     err = await _password_step_response(connection, routes, "<html><body/></html>")
@@ -643,7 +652,8 @@ PASSKEY_PAGE = _acul_page(
 
 @pytest.mark.asyncio
 async def test_authorize_request_carries_pkce_challenge(
-    connection: Connection, routes,
+    connection: Connection,
+    routes,
 ):
     """Auth0 enforces PKCE: /authorize must send an S256 challenge and the
     token exchange must replay the matching verifier.
@@ -663,9 +673,13 @@ async def test_authorize_request_carries_pkce_challenge(
 
     token_body = parse_qs(token_route.calls[-1].request.content.decode())
     verifier = token_body["code_verifier"][0]
-    expected = base64.urlsafe_b64encode(
-        hashlib.sha256(verifier.encode()).digest(),
-    ).rstrip(b"=").decode()
+    expected = (
+        base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest(),
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     assert challenge == expected
 
 
@@ -704,13 +718,16 @@ async def test_passkey_enrollment_screen_is_declined(connection: Connection, rou
 
 @pytest.mark.asyncio
 async def test_unparseable_passkey_screen_is_reported(
-    connection: Connection, routes, monkeypatch,
+    connection: Connection,
+    routes,
+    monkeypatch,
 ):
     """An enrollment screen we cannot parse exhausts the poll, and the reason
     stays attached to the failure instead of vanishing.
     """
     monkeypatch.setattr(
-        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS", (0.0, 0.0),
+        "pyporscheconnectapi.oauth2._RESUME_POLL_DELAYS",
+        (0.0, 0.0),
     )
     routes.get("/authorize").mock(return_value=_redirect(f"{REDIRECT_URI}?state=ST"))
     routes.post("/u/login/identifier").mock(return_value=httpx.Response(200))
@@ -750,7 +767,9 @@ async def test_captcha_error_carries_code_verifier(connection: Connection, route
 
 @pytest.mark.asyncio
 async def test_captcha_resume_without_verifier_raises(
-    email: str, password: str, routes,
+    email: str,
+    password: str,
+    routes,
 ):
     """Resuming a captcha without the verifier cannot work — say so up front
     instead of letting Auth0 reject the token exchange with an opaque error.
@@ -772,7 +791,10 @@ async def test_captcha_resume_without_verifier_raises(
 
 @pytest.mark.asyncio
 async def test_debug_log_never_holds_tokens_or_code(
-    email: str, password: str, routes, caplog,
+    email: str,
+    password: str,
+    routes,
+    caplog,
 ):
     """Users paste debug logs into issues: no token or code may end up there."""
     caplog.set_level("DEBUG", logger="pyporscheconnectapi")
@@ -792,7 +814,10 @@ async def test_debug_log_never_holds_tokens_or_code(
         login = Connection(email=email, password=password, async_client=client)
         await login.get_token()
         refresh = Connection(
-            email=email, password=password, async_client=client, token=_expired_token(),
+            email=email,
+            password=password,
+            async_client=client,
+            token=_expired_token(),
         )
         await refresh.get_token()
 
@@ -808,8 +833,12 @@ async def test_login_transport_error_is_wrapped_and_captcha_is_cleared(email: st
     """
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client,
-            captcha_code="ABC123", state="ST", code_verifier="V",
+            email=email,
+            password=password,
+            async_client=client,
+            captcha_code="ABC123",
+            state="ST",
+            code_verifier="V",
         )
         with respx.mock() as router:
             router.post(f"https://{AUTHORIZATION_SERVER}/u/login/identifier").mock(
@@ -819,3 +848,71 @@ async def test_login_transport_error_is_wrapped_and_captcha_is_cleared(email: st
                 await conn.get_token()
 
         assert conn.oauth2_client.captcha.captcha_code is None
+
+
+# -- Auth0 page parsing and passkey edge cases ------------------------------
+
+
+async def test_refresh_without_a_refresh_token_makes_no_request(connection: Connection, routes):
+    """No refresh token: fall through to a full login instead of POSTing None."""
+    assert await connection.oauth2_client.refresh_token(None) == {"access_token": None, "expires_in": 0}
+    assert not routes.calls
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        ('<div role="alert"> Too many attempts </div>', "Too many attempts"),
+        ('<span class="ulp-error-info">Wrong email or password</span>', "Wrong email or password"),
+        ('<p id="error-element-password">Blocked</p>', "Blocked"),
+        ("<p>nothing to see</p>", None),
+    ],
+)
+def test_extract_auth0_error(connection: Connection, html, expected):
+    assert connection.oauth2_client._extract_auth0_error(html) == expected  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        (_acul_page({"screen": {"captcha": {"image": "data:image/svg+xml;base64,AAA"}}}), "data:image/svg+xml;base64,AAA"),
+        ('<img alt="captcha" src="data:image/png;base64,BBB">', "data:image/png;base64,BBB"),
+        ("<script>x = 'data:image/svg+xml;base64,CCC' ;</script>", "data:image/svg+xml;base64,CCC'"),
+        ('<script>atob("not-base64!")</script><p>none</p>', None),
+    ],
+)
+def test_extract_captcha_image(connection: Connection, html, expected):
+    assert connection.oauth2_client._extract_captcha_image(html) == expected  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("page", "post_status", "error"),
+    [
+        ("<html>no context</html>", 302, "PASSKEY_ENROLLMENT_CONTEXT_MISSING"),
+        (_acul_page({"transaction": {}}), 302, "PASSKEY_ENROLLMENT_STATE_MISSING"),
+        (PASSKEY_PAGE, 200, "PASSKEY_ENROLLMENT_SKIP_FAILED"),
+    ],
+)
+async def test_passkey_enrollment_failures_are_named(connection: Connection, routes, page, post_status, error):
+    routes.get("/u/passkey-enrollment").mock(return_value=httpx.Response(200, text=page))
+    routes.post("/u/passkey-enrollment").mock(return_value=httpx.Response(post_status))
+
+    with pytest.raises(PorscheExceptionError, match=error):
+        await connection.oauth2_client._skip_passkey_enrollment(  # noqa: SLF001
+            f"https://{AUTHORIZATION_SERVER}/u/passkey-enrollment?state=PKSTATE",
+        )
+
+
+async def test_resume_redirect_loop_is_bounded(connection: Connection, routes):
+    routes.get("/authorize/resume").mock(return_value=_redirect("/authorize/resume?state=LOOP"))
+
+    with pytest.raises(PorscheExceptionError, match="AUTHORIZATION_CODE_REDIRECT_LOOP"):
+        await connection.oauth2_client.resume_authorization_code_flow(
+            f"https://{AUTHORIZATION_SERVER}/authorize/resume?state=LOOP",
+        )
+
+
+def test_token_built_from_expires_in_gets_an_absolute_expiry():
+    token = OAuth2Token({"access_token": "A", "expires_in": 3600})
+    assert token.is_expired() is False
+    assert OAuth2Token({}).is_expired() is None
