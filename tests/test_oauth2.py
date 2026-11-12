@@ -79,6 +79,24 @@ async def test_existing_auth0_session_returns_code_directly(
 
 
 @pytest.mark.asyncio
+async def test_refused_authorize_reports_status_and_reason(
+    connection: Connection, routes,
+):
+    """A refused /authorize says why instead of a bare failure (issue #27)."""
+    routes.get("/authorize").mock(
+        return_value=httpx.Response(
+            403, text='<p class="error-message">Callback URL mismatch.</p>',
+        ),
+    )
+
+    with pytest.raises(PorscheExceptionError) as excinfo:
+        await connection.get_token()
+    assert excinfo.value.message == (
+        "Could not fetch authorization code: HTTP 403 (Callback URL mismatch.)"
+    )
+
+
+@pytest.mark.asyncio
 async def test_identifier_first_flow_with_relative_resume_path(
     connection: Connection, routes,
 ):
