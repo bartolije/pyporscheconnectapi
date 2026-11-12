@@ -24,6 +24,14 @@ First stable release of this fork. One release for everything below.
 ### Fixed
 
 - `str()` of a `PorscheExceptionError` was empty; it is now the message.
+- With an `httpx2` client, which Home Assistant 2026.11 and later pass to the
+  library, HTTP errors, network failures and a rejected refresh token escaped as
+  raw `httpx2` exceptions: no retry, no fresh login, no `PorscheExceptionError`.
+  The library no longer depends on the exception classes of the client it is
+  given, and accepts both `httpx.AsyncClient` and `httpx2.AsyncClient` in its
+  annotations.
+- A token endpoint answer that is not JSON, or has no `expires_in`, raised
+  `JSONDecodeError` or `KeyError`.
 - An empty or non-JSON API response raised a raw `JSONDecodeError`.
 - A network failure during login raised a raw `httpx` exception.
 - A used captcha code stayed on the client and broke the next full login.

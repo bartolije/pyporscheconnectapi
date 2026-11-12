@@ -55,22 +55,22 @@ A simple cli is provided with this library, it will cache tokens to a file to sp
 
 If no email or password is supplied as input arguments and no config file with those details is found you will be prompted.
 ```
-usage: porschecli [-h] [-d] [-j] [-e EMAIL] [-p PASSWORD] [-s SESSION_FILE] [--nowait]
-                  {list,token,capabilities,currentoverview,storedoverview,trip_statistics,pictures,location,climatise_on,climatise_off,direct_charge_on,direct_charge_off,flash_indicators,honk_and_flash,lock_vehicle,unlock_vehicle,vehicle_closed,doors_and_lids,tire_pressure_status,tire_pressures,chargingprofile}
-                  ...
+usage: porschecli [-h] [-d] [-j] [-e EMAIL] [-p PASSWORD] [-s SESSION_FILE]
+                  {list,token,battery,capabilities,chargingprofile,chargingsettings,climatise_off,climatise_on,connected,currentoverview,direct_charge_off,direct_charge_on,doors_and_lids,flash_indicators,honk_and_flash,location,lock_vehicle,pictures,storedoverview,tire_status,tire_pressures,trip_statistics,unlock_vehicle,vehicle_closed} ...
 
 Porsche Connect CLI
 
 positional arguments:
-  {list,token,capabilities,currentoverview,storedoverview,trip_statistics,pictures,location,climatise_on,climatise_off,direct_charge_on,direct_charge_off,flash_indicators,honk_and_flash,lock_vehicle,unlock_vehicle,vehicle_closed,doors_and_lids,tire_pressure_status,tire_pressures,chargingprofile}
+  {list,token,battery,capabilities,chargingprofile,chargingsettings,climatise_off,climatise_on,connected,currentoverview,direct_charge_off,direct_charge_on,doors_and_lids,flash_indicators,honk_and_flash,location,lock_vehicle,pictures,storedoverview,tire_status,tire_pressures,trip_statistics,unlock_vehicle,vehicle_closed}
                         command help
     battery             Prints the main battery level (BEV)
     capabilities        Get vehicle capabilities
     chargingprofile     Update parameters in configured charging profile
+    chargingsettings    Update charging settings
     climatise_off       Stop remote climatisation
     climatise_on        Start remote climatisation
     connected           Check if vehicle is on-line
-    currentoverview     Get stored overview for vehicle
+    currentoverview     Poll vehicle for current overview
     direct_charge_off   Disable direct charging
     direct_charge_on    Enable direct charging
     doors_and_lids      List status of all doors and lids
@@ -79,7 +79,7 @@ positional arguments:
     location            Show location of vehicle
     lock_vehicle        Lock vehicle
     pictures            Get vehicle pictures url
-    storedoverview      Poll vehicle for current overview
+    storedoverview      Get stored overview for vehicle
     tire_status         Check if tire pressure are ok
     tire_pressures      Get tire pressure readings
     trip_statistics     Get trip statistics from backend
@@ -89,11 +89,10 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -d, --debug
-  -j, --json            output in JSON format
-  -e EMAIL, --email EMAIL
-  -p PASSWORD, --password PASSWORD
-  -s SESSION_FILE, --sessionfile SESSION_FILE
-
+  -j, --json
+  -e, --email EMAIL
+  -p, --password PASSWORD
+  -s, --sessionfile SESSION_FILE
 ```
 
 ## Config file (for CLI)

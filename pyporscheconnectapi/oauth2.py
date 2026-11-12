@@ -1,6 +1,8 @@
 """Authentication token management for Porsche Connect API."""
 
 #  SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+
 import asyncio
 import base64
 import binascii
@@ -11,10 +13,9 @@ import re
 import secrets
 import time
 from functools import partial
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from .const import (
@@ -36,7 +37,10 @@ from .exceptions import (
     PorscheLoginThrottledError,
     PorscheWrongCredentialsError,
 )
-from .retry import send_with_retries
+from .retry import TRANSPORT_ERRORS, send_with_retries
+
+if TYPE_CHECKING:
+    from .retry import AsyncClient, Response
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,14 +122,14 @@ class OAuth2Token(dict[str, Any]):
 class OAuth2Client:
     """Utility class to handle OAuth2 authentication with Porsche Connect.
 
-    :param client: httpx.AsyncClient
+    :param client: httpx.AsyncClient or httpx2.AsyncClient
     :param credentials: tuple of email, password
     :param leeway: time in seconds to consider token as expired before it actually expires
     """
 
     def __init__(
         self,
-        client: httpx.AsyncClient,
+        client: AsyncClient,
         credentials: Credentials,
         captcha: Captcha,
         leeway: int = 60,
@@ -226,9 +230,7 @@ class OAuth2Client:
                 urljoin(f"https://{AUTHORIZATION_SERVER}", resume_path),
             )
 
-        except httpx.HTTPStatusError as exc:
-            raise PorscheExceptionError(exc.response.status_code) from exc
-        except httpx.TransportError as exc:
+        except TRANSPORT_ERRORS as exc:
             msg = f"transport error during login: {exc.__class__.__name__}"
             raise PorscheExceptionError(msg) from exc
         finally:
@@ -370,7 +372,8 @@ class OAuth2Client:
                 headers=self.headers,
                 follow_redirects=False,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise PorscheExceptionError(resp.status_code)
             html = resp.text
 
         context = self._extract_universal_login_context(html)
@@ -582,20 +585,15 @@ class OAuth2Client:
         if self.code_verifier is not None:
             data["code_verifier"] = self.code_verifier
 
-        try:
-            _LOGGER.debug("Exchanging the authorization code for an access token.")
+        _LOGGER.debug("Exchanging the authorization code for an access token.")
 
-            resp = await send_with_retries(
-                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
-                description="token endpoint (authorization_code)",
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise PorscheExceptionError(
-                exc.response.status_code,
-                response_body=exc.response.text[:1000] or None,
-            ) from exc
+        resp = await send_with_retries(
+            partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+            description="token endpoint (authorization_code)",
+        )
+        if resp.status_code >= 400:
+            raise PorscheExceptionError(resp.status_code, response_body=resp.text[:1000] or None)
+        return self._token_json(resp)
 
     async def refresh_token(self, refresh_token: str | None) -> dict[str, Any]:
         """Use the provided refresh token to get a new access token.
@@ -611,18 +609,28 @@ class OAuth2Client:
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        try:
-            _LOGGER.debug("Using the refresh token to get a new access token.")
+        _LOGGER.debug("Using the refresh token to get a new access token.")
 
-            resp = await send_with_retries(
-                partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
-                description="token endpoint (refresh_token)",
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as exc:
-            # 403 usually means the refresh token is invalid
-            # clear the access token so the full login flow can happen again
-            if exc.response.status_code == 403:
-                return {"access_token": None, "expires_in": 0}
-            raise PorscheExceptionError(exc.response.status_code) from exc
+        resp = await send_with_retries(
+            partial(self.client.post, TOKEN_URL, data=data, timeout=TIMEOUT, headers=self.headers),
+            description="token endpoint (refresh_token)",
+        )
+        # 403 usually means the refresh token is invalid
+        # clear the access token so the full login flow can happen again
+        if resp.status_code == 403:
+            return {"access_token": None, "expires_in": 0}
+        if resp.status_code >= 400:
+            raise PorscheExceptionError(resp.status_code)
+        return self._token_json(resp)
+
+    def _token_json(self, resp: Response) -> dict[str, Any]:
+        """Return the token endpoint's JSON body, or raise a library error if it is not one."""
+        try:
+            token: dict[str, Any] = resp.json()
+        except ValueError as exc:
+            msg = f"Non-JSON response (HTTP {resp.status_code}) from the token endpoint"
+            raise PorscheExceptionError(msg) from exc
+        if "expires_in" not in token:
+            msg = "The token endpoint returned no expires_in"
+            raise PorscheExceptionError(msg)
+        return token

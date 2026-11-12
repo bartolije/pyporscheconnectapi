@@ -29,6 +29,7 @@ from pyporscheconnectapi.account import PorscheConnectAccount
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.const import MEASUREMENTS
 from pyporscheconnectapi.exceptions import PorscheCaptchaRequiredError
+from pyporscheconnectapi.vehicle import PorscheVehicle
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = pathlib.Path(__file__).resolve().parent / "_explore_out"
@@ -79,9 +80,9 @@ def save_captcha_image(captcha: str) -> pathlib.Path:
     return path
 
 
-async def wait_for_captcha_code(captcha: str, state: str) -> str:
+async def wait_for_captcha_code(captcha: str | None, state: str | None) -> str:
     """Persist the captcha image and block until the code file appears."""
-    img_path = save_captcha_image(captcha)
+    img_path = save_captcha_image(captcha or "")
     (OUT / "captcha_state.txt").write_text(state or "")
     code_file = OUT / "captcha_code.txt"
     if code_file.exists():
@@ -94,7 +95,7 @@ async def wait_for_captcha_code(captcha: str, state: str) -> str:
     return code
 
 
-async def fetch_vehicles(env: dict[str, str], client: httpx.AsyncClient):
+async def fetch_vehicles(env: dict[str, str], client: httpx.AsyncClient) -> tuple[Connection, list[PorscheVehicle]]:
     """Authenticate (solving a captcha if needed) and return the vehicle list."""
     conn = Connection(env["EMAIL"], env["PASSWORD"], async_client=client)
     account = PorscheConnectAccount(connection=conn)
@@ -107,6 +108,8 @@ async def fetch_vehicles(env: dict[str, str], client: httpx.AsyncClient):
             env["PASSWORD"],
             captcha_code=code,
             state=exc.state,
+            # Without the PKCE verifier of the interrupted login the token exchange fails.
+            code_verifier=exc.code_verifier,
             async_client=client,
         )
         account = PorscheConnectAccount(connection=conn)

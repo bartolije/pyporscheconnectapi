@@ -17,7 +17,7 @@ from http.cookiejar import Cookie
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import httpx
+    from .retry import Cookies
 
 # Every constructor field of http.cookiejar.Cookie except ``rest``, which is
 # stored in the private ``_rest`` attribute and handled separately. The
@@ -43,7 +43,7 @@ _COOKIE_FIELDS = (
 )
 
 
-def serialize_cookies(cookies: httpx.Cookies) -> list[dict[str, Any]]:
+def serialize_cookies(cookies: Cookies) -> list[dict[str, Any]]:
     """Serialise every cookie in the jar to a JSON-compatible list of dicts."""
     return [
         {
@@ -56,7 +56,7 @@ def serialize_cookies(cookies: httpx.Cookies) -> list[dict[str, Any]]:
     ]
 
 
-def deserialize_cookies(cookies: httpx.Cookies, data: list[dict[str, Any]]) -> None:
+def deserialize_cookies(cookies: Cookies, data: list[dict[str, Any]]) -> None:
     """Restore cookies serialised by :func:`serialize_cookies` into the jar.
 
     ``jar.set_cookie`` replaces any cookie with the same (domain, path,
