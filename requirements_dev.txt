@@ -3,3 +3,4 @@ pytest
 pytest-asyncio
 pytest-cov
 respx
+ruff==0.15.15

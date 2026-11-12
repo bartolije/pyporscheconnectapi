@@ -34,6 +34,12 @@ The easiest method is to install using pip3/pip (venv is also a good idea).
 pip install pyporscheconnectapi-bartolije
 ```
 
+The command line tool needs two more packages, installed with the `cli` extra:
+
+```
+pip install "pyporscheconnectapi-bartolije[cli]"
+```
+
 to update to the latest version
 
 ```

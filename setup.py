@@ -7,7 +7,7 @@ from setuptools import setup
 
 setup(
     name="pyporscheconnectapi-bartolije",
-    version="0.6.2",
+    version="1.0.0",
     author="Jeremie Bartoli",
     description=(
         "Python library and CLI for communicating with Porsche Connect API "
@@ -26,11 +26,11 @@ setup(
     packages=["pyporscheconnectapi"],
     python_requires=">=3.12",
     install_requires=[
-        "aiofiles",
         "httpx<1",
         "beautifulsoup4",
-        "rich",
     ],
+    # Only porschecli needs these; a library user (Home Assistant) does not.
+    extras_require={"cli": ["aiofiles", "rich"]},
     classifiers=[
         "Operating System :: OS Independent",
         "Programming Language :: Python",
