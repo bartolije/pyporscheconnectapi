@@ -7,6 +7,15 @@
 - The requests carry the user agent of the current app (21.26.46, build
   195601). Porsche refuses app builds older than 183720; the previous one,
   186611, was still accepted.
+- A rejected token (401) is logged at debug level, not as a warning on every
+  attempt.
+
+### Fixed
+
+- An undecodable body or too many redirects escaped as a raw `httpx`
+  exception. Every error of the HTTP client is now a `PorscheExceptionError`.
+- A command answered with `"status": null`, or with something that is not an
+  object, raised `AttributeError`.
 
 ## 1.0.1
 

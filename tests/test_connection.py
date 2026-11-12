@@ -405,3 +405,13 @@ async def test_login_refused_before_the_login_page_gives_the_reason(connection: 
 
         with pytest.raises(PorscheExceptionError, match="Callback URL mismatch"):
             await connection.get_token()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [httpx.DecodingError("bad body"), httpx.TooManyRedirects("loop")])
+async def test_any_http_client_error_is_a_library_error(authed_connection: Connection, failure):
+    with respx.mock(base_url=API_BASE_URL) as router:
+        router.post("/connect/v1/vehicles/VIN/commands").mock(side_effect=failure)
+
+        with pytest.raises(PorscheExceptionError):
+            await authed_connection.post("/connect/v1/vehicles/VIN/commands", json={})

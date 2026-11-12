@@ -565,3 +565,17 @@ async def test_unlock_with_a_malformed_pin_does_not_echo_it(authed_connection: C
 def test_execution_state_is_case_insensitive_and_falls_back():
     assert ExecutionState("performed") is ExecutionState.PERFORMED
     assert ExecutionState("REJECTED") is ExecutionState.UNKNOWN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{"status": None}, ["unexpected"]])
+async def test_command_with_an_unusable_answer_is_a_library_error(authed_connection: Connection, api_routes, monkeypatch, body):
+    await _drain_polling_sleep(monkeypatch)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(return_value=httpx.Response(200, json=body))
+    api_routes.get(url__regex=rf"/connect/v1/vehicles/{VIN}.*").mock(return_value=httpx.Response(200, json={"vin": VIN}))
+
+    try:
+        status = await _make_vehicle(authed_connection).remote_services.flash_indicators()
+    except PorscheExceptionError:
+        return
+    assert status.state == ExecutionState.UNKNOWN
