@@ -136,8 +136,11 @@ except PorscheCaptchaRequiredError as err:
 
 # ... later, in a fresh process, once the captcha is solved:
 connection = Connection(
-    email, password,
-    captcha_code=solved_code, state=state, cookies=cookies,
+    email,
+    password,
+    captcha_code=solved_code,
+    state=state,
+    cookies=cookies,
     code_verifier=code_verifier,
 )
 await connection.get_token()

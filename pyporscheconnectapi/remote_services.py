@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
+import datetime as dt
 import logging
 from enum import StrEnum as _StrEnum
 from hashlib import sha512
@@ -353,12 +353,12 @@ class RemoteServices:
 
         :raises PorscheRemoteServiceError: on ERROR, or with no final answer before _POLLING_TIMEOUT
         """
-        fail_after = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+        fail_after = dt.datetime.now(dt.UTC) + dt.timedelta(
             seconds=_POLLING_TIMEOUT,
         )
         status = None
         delay = _POLLING_DELAY
-        while datetime.datetime.now(datetime.UTC) < fail_after:
+        while dt.datetime.now(dt.UTC) < fail_after:
             await asyncio.sleep(delay)
             delay = min(delay + _POLLING_DELAY, _POLLING_MAX_DELAY)
             status = await self._get_remote_service_status(status_id)

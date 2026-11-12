@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import json  # only for formatting debug output
 import logging
 import re
@@ -28,11 +28,11 @@ _TIRE_CORNERS = {
 }
 
 
-def _parse_porsche_datetime(datetime_str: str) -> datetime.datetime:
+def _parse_porsche_datetime(datetime_str: str) -> dt.datetime:
     """Parse Porsche API timestamps, including UTC timestamps with a trailing Z."""
     if datetime_str.endswith("Z"):
         datetime_str = datetime_str[:-1] + "+00:00"
-    return datetime.datetime.fromisoformat(datetime_str)
+    return dt.datetime.fromisoformat(datetime_str)
 
 
 class PorscheVehicle:
@@ -168,7 +168,7 @@ class PorscheVehicle:
         return (self.data.get("HVAC_SUMMARY") or {}).get("remainingTime")
 
     @property
-    def last_global_update(self) -> datetime.datetime | None:
+    def last_global_update(self) -> dt.datetime | None:
         """Return when the car last sent its data, if reported."""
         timestamp = (self.data.get("GLOBAL_TIMESTAMP") or {}).get("timestamp")
         return _parse_porsche_datetime(timestamp) if timestamp else None
@@ -237,7 +237,7 @@ class PorscheVehicle:
         return self.data.get("CHARGING_SUMMARY", {}).get("minSoC")
 
     @property
-    def location_updated_at(self) -> datetime.datetime | None:
+    def location_updated_at(self) -> dt.datetime | None:
         """Return time stamp of latest location update."""
         datetime_str = self.data.get("GPS_LOCATION", {}).get("lastModified")
         if datetime_str:
