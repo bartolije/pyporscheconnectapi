@@ -311,9 +311,10 @@ class RemoteServices:
             json=payload,
         )
 
-        if response:
-            status_id = response.get("status", {}).get("id")
-            result_code = response.get("status", {}).get("result")
+        if isinstance(response, dict) and response:
+            status = response.get("status") or {}
+            status_id = status.get("id")
+            result_code = status.get("result")
         else:
             msg = "Did not receive response for remote service request"
             raise PorscheRemoteServiceError(

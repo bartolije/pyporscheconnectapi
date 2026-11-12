@@ -31,13 +31,15 @@ if TYPE_CHECKING:
 
 # httpx2 exceptions do not inherit from the httpx ones, so both families are
 # listed. httpx2 is optional: only a caller that passes an httpx2 client has it.
-TRANSPORT_ERRORS: tuple[type[Exception], ...] = (httpx.TransportError,)
+# HTTPError covers transport errors and the rarer ones (undecodable body, too
+# many redirects): none may escape as a raw client exception.
+TRANSPORT_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError,)
 try:
     import httpx2 as _httpx2
 except ImportError:  # pragma: no cover - httpx2 is installed in the test environment
     pass
 else:
-    TRANSPORT_ERRORS += (_httpx2.TransportError,)
+    TRANSPORT_ERRORS += (_httpx2.HTTPError,)
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -142,7 +142,7 @@ class Connection:
             # token a refresh can still recover.
             if resp.status_code == HTTP_UNAUTHORIZED and not reauthed:
                 reauthed = True
-                _LOGGER.warning("401 on %s - forcing token refresh and retrying once", path)
+                _LOGGER.debug("401 on %s - forcing token refresh and retrying once", path)
                 async with self.token_lock:
                     # Non-zero past timestamp on purpose: is_expired() treats
                     # 0 as "no expiry info" (→ full re-login), whereas 1
