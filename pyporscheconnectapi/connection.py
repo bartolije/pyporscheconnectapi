@@ -13,7 +13,7 @@ from .const import API_BASE_URL, TIMEOUT, USER_AGENT, X_CLIENT_ID
 from .cookies import deserialize_cookies
 from .exceptions import PorscheExceptionError
 from .oauth2 import Captcha, Credentials, OAuth2Client, OAuth2Token
-from .retry import send_with_retries
+from .retry import MAX_RETRIES, send_with_retries
 
 if TYPE_CHECKING:
     from .retry import AsyncClient, Response
@@ -99,7 +99,7 @@ class Connection:
     async def request(self, method: str, url: str, **kwargs: Any) -> Any:
         """Create a request to the Porsche Connect API.
 
-        Transient errors (429/502/503/504, transport hiccups) are retried
+        Transient errors (429/502/503/504, transport hiccups) on a GET are retried
         by :func:`send_with_retries` - these are server-side issues the
         Porsche API surfaces regularly and that previously caused the whole
         integration to report SETUP_RETRY or mark every entity Unavailable
@@ -126,7 +126,9 @@ class Connection:
 
         reauthed = False
         while True:
-            resp = await send_with_retries(_send, description=url)
+            # Only reads are replayed: a 504 or a timeout does not say whether a
+            # command reached the car, and sending it again could run it twice.
+            resp = await send_with_retries(_send, description=url, max_retries=MAX_RETRIES if method == "GET" else 0)
             # A 401 means the access token was rejected server-side (revoked,
             # clock skew, ...). Force one re-authentication and retry before
             # giving up - avoids a spurious reauth/captcha prompt in HA for a

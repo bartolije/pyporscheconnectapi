@@ -109,7 +109,7 @@ session_file=<file to store session information>
 
 ## Library usage
 
-Install pyporscheconnectapi-bartolije using pip (requires python >= 3.10)
+Install pyporscheconnectapi-bartolije using pip (requires python >= 3.12)
 
 
 ### Example client usage

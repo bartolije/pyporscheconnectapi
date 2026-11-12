@@ -364,3 +364,16 @@ async def test_put_sends_a_put(authed_connection: Connection):
         route = router.put(f"{API_BASE_URL}/x").mock(return_value=httpx.Response(200, json={"ok": True}))
         assert await authed_connection.put("/x", json={"a": 1}) == {"ok": True}
     assert route.called
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [httpx.Response(504), httpx.ReadTimeout("slow")])
+async def test_command_is_not_sent_again_after_a_transient_failure(authed_connection: Connection, failure):
+    """A 504 or a timeout does not say the command was lost: sending it again could run it twice."""
+    with respx.mock(base_url=API_BASE_URL) as router:
+        route = router.post("/connect/v1/vehicles/VIN/commands").mock(side_effect=[failure, httpx.Response(200, json={})])
+
+        with pytest.raises(PorscheExceptionError):
+            await authed_connection.post("/connect/v1/vehicles/VIN/commands", json={"key": "HONK_FLASH"})
+
+    assert route.call_count == 1

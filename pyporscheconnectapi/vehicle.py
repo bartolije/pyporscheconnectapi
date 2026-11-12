@@ -115,10 +115,10 @@ class PorscheVehicle:
 
     @property
     def main_battery_level(self) -> int:
-        """Return the main battery level (TODO: for non-BEV it should use the 12V battery level if available?)."""
+        """Return the high voltage battery level (BEV and PHEV), 0 for a combustion vehicle."""
         level = 0
-        if not self.has_ice_drivetrain:
-            level = self.data.get("BATTERY_LEVEL", {}).get("percent", 0)
+        if self.has_electric_drivetrain:
+            level = (self.data.get("BATTERY_LEVEL") or {}).get("percent", 0)
         return level
 
     @property
@@ -180,9 +180,10 @@ class PorscheVehicle:
         return zones if isinstance(zones, dict) else None
 
     @property
-    def vehicle_locked(self) -> bool:
-        """Return True if vehicle is locked."""
-        return self.data.get("LOCK_STATE_VEHICLE", {}).get("isLocked") is True
+    def vehicle_locked(self) -> bool | None:
+        """Return True if vehicle is locked, None when the car does not report it."""
+        locked = (self.data.get("LOCK_STATE_VEHICLE") or {}).get("isLocked")
+        return locked if isinstance(locked, bool) else None
 
     @property
     def vehicle_closed(self) -> bool:
@@ -385,9 +386,9 @@ class PorscheVehicle:
                         # its last value must not live on. A measurement merely
                         # absent from one payload keeps its value.
                         disabled.add(m["key"])
-                    # An enabled measurement can still omit "value" (e.g.
-                    # transient API states); skip it rather than KeyError.
-                    elif "value" in m:
+                    # An enabled measurement can still omit "value" or send null
+                    # (e.g. transient API states); skip it rather than crash.
+                    elif m.get("value") is not None:
                         mdata[m["key"]] = m["value"]
 
                 if "CHARGING_RATE" in mdata and not mdata.get("CHARGING_RATE", {}).get("chargingRate"):

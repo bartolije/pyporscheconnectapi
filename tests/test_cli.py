@@ -90,6 +90,9 @@ class _FakeConnection:
         self.token = token or {"access_token": "A"}
         self.closed = False
 
+    async def get_token(self):
+        return self.token
+
     async def close(self):
         self.closed = True
 
@@ -100,7 +103,7 @@ class _FakeAccount:
 
     def __init__(self, connection=None):
         self.connection = connection
-        self.token = connection.token
+        self.token = None
 
     async def get_vehicles(self):
         if self.fail_with is not None:
