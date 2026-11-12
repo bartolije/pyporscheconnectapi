@@ -34,6 +34,12 @@ The easiest method is to install using pip3/pip (venv is also a good idea).
 pip install pyporscheconnectapi-bartolije
 ```
 
+The command line tool needs two more packages, installed with the `cli` extra:
+
+```
+pip install "pyporscheconnectapi-bartolije[cli]"
+```
+
 to update to the latest version
 
 ```
@@ -126,20 +132,68 @@ try:
     connection = Connection(email, password)
     await connection.get_token()
 except PorscheCaptchaRequiredError as err:
-    persist(err.captcha, err.state, err.cookies)  # cookies is JSON-compatible
+    # cookies is JSON-compatible
+    persist(err.captcha, err.state, err.cookies, err.code_verifier)
 
 # ... later, in a fresh process, once the captcha is solved:
 connection = Connection(
     email, password,
     captcha_code=solved_code, state=state, cookies=cookies,
+    code_verifier=code_verifier,
 )
 await connection.get_token()
 ```
 
-Treat `err.cookies` like a password: it is the Auth0 session secret.
+Treat `err.cookies` and `err.code_verifier` like a password: together they are the
+Auth0 session secret.
 
 ### Transient error handling
 
 Requests to the Porsche API — including the OAuth2 token endpoints — retry
 transparently on transient failures (HTTP 429/502/503/504 and network
 errors) with capped exponential backoff, honouring `Retry-After`.
+
+### Errors
+
+Every failure the library reports is a `PorscheExceptionError` (or a subclass:
+`PorscheWrongCredentialsError`, `PorscheLoginThrottledError`,
+`PorscheCaptchaRequiredError`, `PorscheRemoteServiceError`). `str(exc)` is a
+short readable message, safe to show to a user: it never contains a token, a
+password or a PIN.
+
+### Typing
+
+The package is fully annotated and ships a `py.typed` marker, so mypy and
+pyright check your calls into it. API payloads stay plain dictionaries
+(`vehicle.data`): Porsche changes them without notice.
+
+## Development
+
+```
+pip install -r requirements_dev.txt -e ".[cli]"
+ruff check && ruff format --check && mypy && pytest
+```
+
+CI runs the same four checks on every pull request, builds the wheel and
+installs it without the CLI extra.
+
+### Live smoke test (local only)
+
+`scripts/smoke_auth.py` logs in to the real Porsche API with your own account
+and reads your vehicles. It only reads; it sends no command to the car.
+
+```
+cp .porscheconnect.cfg.example .porscheconnect.cfg   # then fill it in
+python scripts/smoke_auth.py
+```
+
+It is never run in CI, on purpose: that would mean storing Porsche credentials
+in GitHub. `.porscheconnect.cfg`, `.session` and the captcha files are
+gitignored; the script prints no token, password or cookie and masks the VINs.
+
+## License
+
+MIT, see [LICENSE](LICENSE). `connection.py`, `exceptions.py`, `oauth2.py`,
+`retry.py` and `cookies.py` carry an `Apache-2.0` header inherited from the code
+they derive from; that license is in [LICENSE-APACHE](LICENSE-APACHE). The
+package metadata therefore declares `MIT AND Apache-2.0`.

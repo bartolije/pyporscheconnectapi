@@ -1,5 +1,8 @@
 httpx
+mypy==1.19.1
 pytest
 pytest-asyncio
 pytest-cov
 respx
+ruff==0.15.15
+types-aiofiles

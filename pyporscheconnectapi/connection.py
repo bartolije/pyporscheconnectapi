@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 import httpx
 
@@ -17,13 +18,6 @@ from .retry import send_with_retries
 _LOGGER = logging.getLogger(__name__)
 
 HTTP_UNAUTHORIZED = 401
-
-
-async def log_request(request):
-    """Provide formatting for http logging."""
-    _LOGGER.debug("Request headers: %s", request.headers)
-    _LOGGER.debug("Request method - url: %s %s", request.method, request.url)
-    _LOGGER.debug("Request body: %s", request.content)
 
 
 class Connection:
@@ -44,8 +38,8 @@ class Connection:
         password: str | None = None,
         captcha_code: str | None = None,
         state: str | None = None,
-        async_client=None,
-        token=None,
+        async_client: httpx.AsyncClient | None = None,
+        token: dict[str, Any] | None = None,
         leeway: int = 60,
         cookies: list[dict] | None = None,
         code_verifier: str | None = None,
@@ -76,29 +70,29 @@ class Connection:
             code_verifier=code_verifier,
         )
 
-    async def get_token(self):
+    async def get_token(self) -> OAuth2Token:
         """Return the authentication token."""
         async with self.token_lock:
             await self.oauth2_client.ensure_valid_token(self.token)
         return self.token
 
-    async def get(self, url, params=None):
+    async def get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         """Make a GET request to the Porsche Connect API."""
         return await self.request("GET", url, params=params)
 
-    async def post(self, url, data=None, json=None):
+    async def post(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a POST request to the Porsche Connect API."""
         return await self.request("POST", url, data=data, json=json)
 
-    async def put(self, url, data=None, json=None):
+    async def put(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a PUT request to the Porsche Connect API."""
         return await self.request("PUT", url, data=data, json=json)
 
-    async def delete(self, url, data=None, json=None):
+    async def delete(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a DELETE request to the Porsche Connect API."""
         return await self.request("DELETE", url, data=data, json=json)
 
-    async def request(self, method, url, **kwargs):
+    async def request(self, method: str, url: str, **kwargs: Any) -> Any:
         """Create a request to the Porsche Connect API.
 
         Transient errors (429/502/503/504, transport hiccups) are retried
@@ -111,13 +105,17 @@ class Connection:
         async with self.token_lock:
             await self.oauth2_client.ensure_valid_token(self.token)
 
+        sent_token = None
+
         async def _send() -> httpx.Response:
             # Headers rebuilt on every attempt: the access token may have
             # been refreshed by the 401 path below.
+            nonlocal sent_token
+            sent_token = self.token.access_token
             return await self.asyncClient.request(
                 method,
                 f"{API_BASE_URL}{url}",
-                headers=self.headers | {"Authorization": f"Bearer {self.token.access_token}"},
+                headers=self.headers | {"Authorization": f"Bearer {sent_token}"},
                 timeout=TIMEOUT,
                 **kwargs,
             )
@@ -137,15 +135,25 @@ class Connection:
                     # 0 as "no expiry info" (→ full re-login), whereas 1
                     # forces the cheaper refresh path first and only
                     # escalates to a full login if the refresh itself fails.
-                    self.token["expires_at"] = 1
+                    # Concurrent requests all get the same 401: only the
+                    # first one refreshes, the others reuse its new token.
+                    if self.token.access_token == sent_token:
+                        self.token["expires_at"] = 1
                     await self.oauth2_client.ensure_valid_token(self.token)
                 continue
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(resp.status_code) from exc
-            return resp.json()
+                raise PorscheExceptionError(resp.status_code, request_url=url) from exc
+            if not resp.content:
+                return None
+            try:
+                return resp.json()
+            except ValueError as exc:
+                # e.g. an HTML maintenance page served with a 200.
+                msg = f"Non-JSON response (HTTP {resp.status_code}) on {url}"
+                raise PorscheExceptionError(msg, request_url=url) from exc
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the asyncClient connection."""
         await self.asyncClient.aclose()

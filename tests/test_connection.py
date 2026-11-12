@@ -1,4 +1,5 @@
 """Tests for pyporscheconnectapi.connection.Connection."""
+
 from __future__ import annotations
 
 import asyncio
@@ -72,7 +73,10 @@ async def test_token_refresh_path_when_expired(email: str, password: str):
 
     async with httpx.AsyncClient() as client:
         conn = Connection(
-            email=email, password=password, async_client=client, token=expired_token,
+            email=email,
+            password=password,
+            async_client=client,
+            token=expired_token,
         )
         try:
             with respx.mock(assert_all_called=False) as router:
@@ -292,3 +296,71 @@ async def test_request_raises_after_second_401(
 
     assert exc_info.value.code == 401
     assert api_route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_request_empty_body_returns_none(authed_connection: Connection):
+    with respx.mock() as router:
+        router.delete(f"{API_BASE_URL}/x").mock(return_value=httpx.Response(204))
+        assert await authed_connection.delete("/x") is None
+
+
+@pytest.mark.asyncio
+async def test_request_wraps_non_json_body(authed_connection: Connection):
+    """An HTML maintenance page served with a 200 is a library error, not JSONDecodeError."""
+    with respx.mock() as router:
+        router.get(f"{API_BASE_URL}/x").mock(return_value=httpx.Response(200, text="<html>maintenance</html>"))
+        with pytest.raises(PorscheExceptionError, match="Non-JSON response"):
+            await authed_connection.get("/x")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_401s_refresh_the_token_once(authed_connection: Connection):
+    def api(request: httpx.Request) -> httpx.Response:
+        fresh = request.headers["Authorization"] == "Bearer refreshed.access.token"
+        return httpx.Response(200 if fresh else 401, json={})
+
+    with respx.mock() as router:
+        token_route = router.post(TOKEN_URL).mock(
+            return_value=httpx.Response(200, json=REFRESHED_TOKEN_PAYLOAD),
+        )
+        router.get(f"{API_BASE_URL}/x").mock(side_effect=api)
+
+        await asyncio.gather(*(authed_connection.get("/x") for _ in range(3)))
+
+    assert token_route.call_count == 1
+
+
+def test_exception_str_carries_the_message():
+    """Callers (Home Assistant) format the exception straight into the UI."""
+    assert str(PorscheExceptionError(503)) == "SERVICE_MAINTENANCE"
+    assert str(PorscheExceptionError("boom")) == "boom"
+    assert str(PorscheExceptionError(403, response_body="denied")) == "UNKNOWN_ERROR_403: denied"
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (400, "BAD_REQUEST"),
+        (401, "UNAUTHORIZED"),
+        (404, "NOT_FOUND"),
+        (405, "MOBILE_ACCESS_DISABLED"),
+        (408, "VEHICLE_UNAVAILABLE"),
+        (423, "ACCOUNT_LOCKED"),
+        (429, "TOO_MANY_REQUESTS"),
+        (500, "SERVER_ERROR"),
+        (504, "UPSTREAM_TIMEOUT"),
+        (418, "UNKNOWN_ERROR_418"),
+    ],
+)
+def test_exception_message_per_http_code(code, message):
+    exc = PorscheExceptionError(code)
+    assert (exc.code, str(exc)) == (code, message)
+
+
+@pytest.mark.asyncio
+async def test_put_sends_a_put(authed_connection: Connection):
+    with respx.mock() as router:
+        route = router.put(f"{API_BASE_URL}/x").mock(return_value=httpx.Response(200, json={"ok": True}))
+        assert await authed_connection.put("/x", json={"a": 1}) == {"ok": True}
+    assert route.called

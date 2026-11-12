@@ -2,6 +2,54 @@
 requires = ["setuptools>=84.2.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "pyporscheconnectapi-bartolije"
+version = "1.0.0"
+description = "Python library and CLI for communicating with Porsche Connect API (fork of CJNE/pyporscheconnectapi by Johan Isacsson)."
+readme = "README.md"
+authors = [{ name = "Jeremie Bartoli" }]
+requires-python = ">=3.12"
+# MIT for the project; connection.py, exceptions.py and oauth2.py carry
+# Apache-2.0 headers from the code they were derived from.
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "LICENSE-APACHE"]
+dependencies = ["httpx<1", "beautifulsoup4"]
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+# Only porschecli needs these; a library user (Home Assistant) does not.
+cli = ["aiofiles", "rich"]
+
+[project.scripts]
+porschecli = "pyporscheconnectapi.cli:cli"
+
+[project.urls]
+Source = "https://github.com/bartolije/pyporscheconnectapi"
+Issues = "https://github.com/bartolije/pyporscheconnectapi/issues"
+Changelog = "https://github.com/bartolije/pyporscheconnectapi/blob/main/CHANGELOG.md"
+"Original project" = "https://github.com/CJNE/pyporscheconnectapi"
+
+[tool.setuptools]
+packages = ["pyporscheconnectapi"]
+
+[tool.setuptools.package-data]
+pyporscheconnectapi = ["py.typed"]
+
+[tool.mypy]
+files = ["pyporscheconnectapi"]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
 [tool.ruff]
 line-length = 160
 
@@ -10,13 +58,14 @@ select = [ "ALL" ]
 # CPY and PLR0917 are preview rules in the pinned ruff but stabilised in newer
 # releases — ignored explicitly so bumping the pin doesn't break CI (the repo
 # uses SPDX headers, not per-file copyright notices; PLR0913 already ignored).
-ignore = [ "ANN", "CPY", "PLR2004", "PLR0912", "PLR0913", "PLR0917", "TC001", "C901", "B008", "D203", "D213" ]
+# COM812 conflicts with the formatter, which owns trailing commas.
+ignore = [ "ANN401", "COM812", "CPY", "PLR2004", "PLR0912", "PLR0913", "PLR0917", "TC001", "C901", "B008", "D203", "D213" ]
 
 [tool.ruff.lint.per-file-ignores]
-"examples/*.py" = [ "INP001", "T201" ]
+"examples/*.py" = [ "INP001", "T201", "ANN" ]
 # Operator-facing smoke script: prints are its output, and it lives outside the package.
-"scripts/*.py" = [ "INP001", "T201", "PLR0911" ]
-"tests/*.py" = [ "INP001", "S101", "D", "ARG001", "S105", "S106" ]
+"scripts/*.py" = [ "INP001", "T201", "PLR0911", "ANN" ]
+"tests/*.py" = [ "INP001", "S101", "D", "ARG001", "S105", "S106", "ANN" ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

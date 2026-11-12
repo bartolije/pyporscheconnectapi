@@ -50,7 +50,7 @@ def serialize_cookies(cookies: httpx.Cookies) -> list[dict[str, Any]]:
             **{field: getattr(cookie, field) for field in _COOKIE_FIELDS},
             # No public API enumerates non-standard attributes (HttpOnly,
             # SameSite, ...) — they only live in the private ``_rest`` dict.
-            "rest": dict(cookie._rest),  # noqa: SLF001
+            "rest": dict(cookie._rest),  # type: ignore[attr-defined]  # noqa: SLF001
         }
         for cookie in cookies.jar
     ]

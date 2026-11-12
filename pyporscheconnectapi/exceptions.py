@@ -12,42 +12,52 @@ _LOGGER = logging.getLogger(__name__)
 class PorscheExceptionError(Exception):
     """Class of Porsche API exceptions."""
 
-    def __init__(self, code=None, *args, response_body=None, request_url=None, **kwargs) -> None:
+    def __init__(
+        self,
+        code: int | str | None = None,
+        *args: object,
+        response_body: str | None = None,
+        request_url: str | None = None,
+    ) -> None:
         """Initialize exceptions for the Porsche API."""
         self.message = ""
         self.response_body = response_body
         self.request_url = request_url
-        super().__init__(*args, **kwargs)
+        super().__init__(*args)
         if code is not None:
-            self.code = code
+            self.code: int | str = code
             if isinstance(code, str):
-                self.message = self.code
+                self.message = code
                 return
-            if self.code == 400:
+            if code == 400:
                 self.message = "BAD_REQUEST"
-            elif self.code == 401:
+            elif code == 401:
                 self.message = "UNAUTHORIZED"
-            elif self.code == 404:
+            elif code == 404:
                 self.message = "NOT_FOUND"
-            elif self.code == 405:
+            elif code == 405:
                 self.message = "MOBILE_ACCESS_DISABLED"
-            elif self.code == 408:
+            elif code == 408:
                 self.message = "VEHICLE_UNAVAILABLE"
-            elif self.code == 423:
+            elif code == 423:
                 self.message = "ACCOUNT_LOCKED"
-            elif self.code == 429:
+            elif code == 429:
                 self.message = "TOO_MANY_REQUESTS"
-            elif self.code == 500:
+            elif code == 500:
                 self.message = "SERVER_ERROR"
-            elif self.code == 503:
+            elif code == 503:
                 self.message = "SERVICE_MAINTENANCE"
-            elif self.code == 504:
+            elif code == 504:
                 self.message = "UPSTREAM_TIMEOUT"
-            elif self.code > 299:
-                self.message = f"UNKNOWN_ERROR_{self.code}"
+            elif code > 299:
+                self.message = f"UNKNOWN_ERROR_{code}"
 
         if self.response_body:
             self.message = f"{self.message}: {self.response_body}"
+
+    def __str__(self) -> str:
+        """Return the message: callers format the exception straight into user-facing text."""
+        return self.message or super().__str__()
 
 
 class PorscheWrongCredentialsError(PorscheExceptionError):
@@ -74,7 +84,13 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
     code_verifier: str | None = None
     cookies: list[dict[str, Any]] | None = None
 
-    def __init__(self, captcha=None, state=None, code_verifier=None, cookies=None):
+    def __init__(
+        self,
+        captcha: str | None = None,
+        state: str | None = None,
+        code_verifier: str | None = None,
+        cookies: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Initialize the captcha exception."""
         if captcha is not None and state is not None:
             # Don't log the captcha payload itself — it's a ~14 KB base64
@@ -94,6 +110,8 @@ class PorscheCaptchaRequiredError(PorscheExceptionError):
         self.cookies = cookies
 
         super().__init__(captcha, state)
+        # Not the ~14 KB captcha data URI that args carries.
+        self.message = "CAPTCHA_REQUIRED"
 
 
 class PorscheRemoteServiceError(PorscheExceptionError):

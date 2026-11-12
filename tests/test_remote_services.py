@@ -1,4 +1,5 @@
 """Tests for pyporscheconnectapi.remote_services.RemoteServices."""
+
 from __future__ import annotations
 
 import asyncio
@@ -78,7 +79,9 @@ async def _drain_polling_sleep(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_climatise_on_posts_remote_climatizer_start(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """`climatise_on()` POSTs key=REMOTE_CLIMATIZER_START with climate zones."""
     await _drain_polling_sleep(monkeypatch)
@@ -95,14 +98,18 @@ async def test_climatise_on_posts_remote_climatizer_start(
     assert body["payload"]["targetTemperature"] == 294.15
     assert body["payload"]["spin"] is None
     assert body["payload"]["climateZonesEnabled"] == {
-        "frontLeft": False, "frontRight": False,
-        "rearLeft":  False, "rearRight":  False,
+        "frontLeft": False,
+        "frontRight": False,
+        "rearLeft": False,
+        "rearRight": False,
     }
 
 
 @pytest.mark.asyncio
 async def test_climatise_off_posts_remote_climatizer_stop(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     await _drain_polling_sleep(monkeypatch)
     route = api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
@@ -120,7 +127,9 @@ async def test_climatise_off_posts_remote_climatizer_stop(
 
 @pytest.mark.asyncio
 async def test_lock_vehicle_posts_lock(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     await _drain_polling_sleep(monkeypatch)
     route = api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
@@ -137,7 +146,9 @@ async def test_lock_vehicle_posts_lock(
 
 @pytest.mark.asyncio
 async def test_unlock_vehicle_round_trips_challenge_then_unlock(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """unlock_vehicle posts SPIN_CHALLENGE, then UNLOCK with the hashed pin."""
     await _drain_polling_sleep(monkeypatch)
@@ -180,7 +191,9 @@ async def test_unlock_vehicle_missing_pin_raises(
 
 @pytest.mark.asyncio
 async def test_flash_indicators_posts_honk_flash(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     await _drain_polling_sleep(monkeypatch)
     route = api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
@@ -197,7 +210,9 @@ async def test_flash_indicators_posts_honk_flash(
 
 @pytest.mark.asyncio
 async def test_honk_and_flash_indicators_posts_honk_and_flash(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     await _drain_polling_sleep(monkeypatch)
     route = api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
@@ -217,7 +232,9 @@ async def test_honk_and_flash_indicators_posts_honk_and_flash(
 
 @pytest.mark.asyncio
 async def test_set_target_soc_uses_charging_settings_when_departures_set(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """If DEPARTURES is present in data, set_target_soc → CHARGING_SETTINGS_EDIT."""
     await _drain_polling_sleep(monkeypatch)
@@ -235,7 +252,9 @@ async def test_set_target_soc_uses_charging_settings_when_departures_set(
 
 @pytest.mark.asyncio
 async def test_set_target_soc_clamps_low_and_high_values(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """update_charging_setting clamps targetSoc to [25, 100]."""
     await _drain_polling_sleep(monkeypatch)
@@ -255,7 +274,9 @@ async def test_set_target_soc_clamps_low_and_high_values(
 
 @pytest.mark.asyncio
 async def test_set_target_soc_uses_charging_profiles_when_no_departures(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """If DEPARTURES is absent, set_target_soc → CHARGING_PROFILES_EDIT.
 
@@ -273,7 +294,7 @@ async def test_set_target_soc_uses_charging_profiles_when_no_departures(
         CHARGING_PROFILES={
             "list": [
                 {"id": 1, "isEnabled": False, "minSoc": 40},
-                {"id": 2, "isEnabled": True,  "minSoc": 50},
+                {"id": 2, "isEnabled": True, "minSoc": 50},
             ],
         },
     )
@@ -294,7 +315,9 @@ async def test_set_target_soc_uses_charging_profiles_when_no_departures(
 
 @pytest.mark.asyncio
 async def test_immediate_performed_response_yields_performed_state(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """When /commands returns a terminal PERFORMED with no status id, the
     returned RemoteServiceStatus must reflect PERFORMED, not UNKNOWN.
@@ -319,14 +342,12 @@ async def test_immediate_performed_response_yields_performed_state(
 
 
 @pytest.mark.asyncio
-async def test_immediate_error_response_yields_error_state(
-    authed_connection: Connection, api_routes, monkeypatch,
+async def test_immediate_error_response_raises(
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
-    """An immediate ERROR result is reported as ExecutionState.ERROR.
-
-    Same regression class as the PERFORMED case — making sure we don't
-    flatten distinct outcomes to UNKNOWN.
-    """
+    """An immediate ERROR result raises, like an ERROR reached through polling."""
     await _drain_polling_sleep(monkeypatch)
     api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
         return_value=httpx.Response(
@@ -336,13 +357,31 @@ async def test_immediate_error_response_yields_error_state(
     )
 
     vehicle = _make_vehicle(authed_connection)
-    status = await vehicle.remote_services.flash_indicators()
-    assert status.state == ExecutionState.ERROR
+    with pytest.raises(PorscheRemoteServiceError, match="ERROR"):
+        await vehicle.remote_services.flash_indicators()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data",
+    [{}, {"CHARGING_PROFILES": {"list": [{"id": 1, "isEnabled": False, "minSoc": 40}]}}],
+)
+async def test_update_charging_profile_without_usable_profile_raises(
+    authed_connection: Connection,
+    api_routes,
+    data,
+):
+    """No profile list, or no active profile: a library error, not KeyError/RuntimeError."""
+    vehicle = _make_vehicle(authed_connection, **data)
+    with pytest.raises(PorscheRemoteServiceError, match="charging profile"):
+        await vehicle.remote_services.update_charging_profile(minimum_charge_level=80)
 
 
 @pytest.mark.asyncio
 async def test_immediate_unknown_result_code_does_not_crash(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """A result code outside the ExecutionState enum (e.g. a future
     `REJECTED`) must not raise during RemoteServiceStatus construction —
@@ -368,7 +407,9 @@ async def test_immediate_unknown_result_code_does_not_crash(
 
 @pytest.mark.asyncio
 async def test_remote_service_raises_when_response_is_null(
-    authed_connection: Connection, api_routes, monkeypatch,
+    authed_connection: Connection,
+    api_routes,
+    monkeypatch,
 ):
     """A JSON-null response body from /commands → PorscheRemoteServiceError.
 
@@ -387,7 +428,8 @@ async def test_remote_service_raises_when_response_is_null(
 
 @pytest.mark.asyncio
 async def test_remote_service_propagates_http_error(
-    authed_connection: Connection, api_routes,
+    authed_connection: Connection,
+    api_routes,
 ):
     """A 500 from the API surfaces as PorscheExceptionError."""
     api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
@@ -402,7 +444,8 @@ async def test_remote_service_propagates_http_error(
 
 @pytest.mark.asyncio
 async def test_send_command_succeeds_even_if_post_refresh_fails(
-    authed_connection: Connection, monkeypatch,
+    authed_connection: Connection,
+    monkeypatch,
 ):
     """A failing post-command status refresh must not mask command success."""
     await _drain_polling_sleep(monkeypatch)
@@ -419,3 +462,102 @@ async def test_send_command_succeeds_even_if_post_refresh_fails(
         status = await vehicle.remote_services.flash_indicators()
 
     assert status.state == ExecutionState.PERFORMED
+
+
+# -- Polling outcomes, PIN handling, enum fallbacks -------------------------
+
+
+@pytest.mark.asyncio
+async def test_polling_error_raises(authed_connection: Connection, api_routes, monkeypatch):
+    await _drain_polling_sleep(monkeypatch)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json=ACCEPTED_RESPONSE),
+    )
+    api_routes.get(f"/connect/v1/vehicles/{VIN}/commands/{STATUS_ID}").mock(
+        return_value=httpx.Response(200, json={"status": {"id": STATUS_ID, "result": "ERROR"}}),
+    )
+
+    with pytest.raises(PorscheRemoteServiceError, match="failed"):
+        await _make_vehicle(authed_connection).remote_services.lock_vehicle()
+
+
+@pytest.mark.asyncio
+async def test_polling_gives_up_after_the_timeout(authed_connection: Connection, api_routes, monkeypatch):
+    """A command that never reaches a final state raises instead of polling forever."""
+    await _drain_polling_sleep(monkeypatch)
+    monkeypatch.setattr("pyporscheconnectapi.remote_services._POLLING_TIMEOUT", 0.05)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json=ACCEPTED_RESPONSE),
+    )
+    api_routes.get(f"/connect/v1/vehicles/{VIN}/commands/{STATUS_ID}").mock(
+        return_value=httpx.Response(200, json={"status": {"id": STATUS_ID, "result": "IN_PROGRESS"}}),
+    )
+
+    with pytest.raises(PorscheRemoteServiceError, match="Did not receive remote service result"):
+        await _make_vehicle(authed_connection).remote_services.lock_vehicle()
+
+
+@pytest.mark.asyncio
+async def test_polling_delay_grows_then_caps(authed_connection: Connection, api_routes, monkeypatch):
+    slept: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def _record(seconds, *a, **kw):
+        slept.append(seconds)
+        await real_sleep(0)
+
+    monkeypatch.setattr("pyporscheconnectapi.remote_services.asyncio.sleep", _record)
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json=ACCEPTED_RESPONSE),
+    )
+    pending = httpx.Response(200, json={"status": {"id": STATUS_ID, "result": "IN_PROGRESS"}})
+    api_routes.get(f"/connect/v1/vehicles/{VIN}/commands/{STATUS_ID}").mock(
+        side_effect=[pending] * 6 + [httpx.Response(200, json=PERFORMED_STATUS)],
+    )
+
+    await _make_vehicle(authed_connection).remote_services.lock_vehicle()
+
+    assert slept[:7] == [1, 2, 3, 4, 5, 5, 5]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["direct_charge_on", "direct_charge_off"])
+async def test_direct_charge_commands(authed_connection: Connection, api_routes, monkeypatch, command):
+    await _drain_polling_sleep(monkeypatch)
+    route = api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json=ACCEPTED_RESPONSE),
+    )
+
+    status = await getattr(_make_vehicle(authed_connection).remote_services, command)()
+
+    assert status.state == ExecutionState.PERFORMED
+    expected = "DIRECT_CHARGING_START" if command.endswith("on") else "DIRECT_CHARGING_STOP"
+    assert json.loads(route.calls.last.request.content)["key"] == expected
+
+
+@pytest.mark.asyncio
+async def test_unlock_without_challenge_raises(authed_connection: Connection, api_routes):
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json={"data": {}}),
+    )
+
+    with pytest.raises(PorscheRemoteServiceError, match="no PIN challenge"):
+        await _make_vehicle(authed_connection).remote_services.unlock_vehicle("1234")
+
+
+@pytest.mark.asyncio
+async def test_unlock_with_a_malformed_pin_does_not_echo_it(authed_connection: Connection, api_routes):
+    api_routes.post(f"/connect/v1/vehicles/{VIN}/commands").mock(
+        return_value=httpx.Response(200, json={"data": {"challenge": "abcdef"}}),
+    )
+
+    with pytest.raises(PorscheRemoteServiceError) as exc_info:
+        await _make_vehicle(authed_connection).remote_services.unlock_vehicle("12zz")
+
+    assert "12zz" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
+def test_execution_state_is_case_insensitive_and_falls_back():
+    assert ExecutionState("performed") is ExecutionState.PERFORMED
+    assert ExecutionState("REJECTED") is ExecutionState.UNKNOWN

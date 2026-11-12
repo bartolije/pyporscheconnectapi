@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from enum import Enum
+from enum import StrEnum as _StrEnum
 from hashlib import sha512
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .exceptions import PorscheExceptionError, PorscheRemoteServiceError
 
@@ -18,24 +18,28 @@ _LOGGER = logging.getLogger(__name__)
 #: time in seconds between receiving status and polling for update
 _POLLING_DELAY = 1
 
+#: the delay grows by one second per poll up to this many seconds: a command
+#: takes seconds when the car is awake and minutes when it has to be woken up
+_POLLING_MAX_DELAY = 5
+
 #: maximum number of seconds to wait for the server to return a positive answer
 _POLLING_TIMEOUT = 240
 
 
-class StrEnum(str, Enum):
-    """A string enumeration of type `(str, Enum)`. All members are compared via `upper()`. Defaults to UNKNOWN."""
+class StrEnum(_StrEnum):
+    """A string enumeration. All members are compared via `upper()`. Defaults to UNKNOWN."""
 
     @classmethod
-    def _missing_(cls, value):
+    def _missing_(cls, value: object) -> StrEnum:
         has_unknown = False
         for member in cls:
             if member.value.upper() == "UNKNOWN":
                 has_unknown = True
-            if member.value.upper() == value.upper():
+            if member.value.upper() == str(value).upper():
                 return member
         if has_unknown:
             _LOGGER.warning("'%s' is not a valid '%s'", value, cls.__name__)
-            return cls.UNKNOWN
+            return cls["UNKNOWN"]
         msg = f"'{value}' is not a valid {cls.__name__}"
         raise ValueError(msg)
 
@@ -51,7 +55,7 @@ class ExecutionState(StrEnum):
 class RemoteServiceStatus:
     """Wraps the status of the execution of a remote service."""
 
-    def __init__(self, response: dict, status_id: str | None = None) -> None:
+    def __init__(self, response: dict[str, Any], status_id: str | None = None) -> None:
         """Construct a new object from a dict."""
         # `response` must be a dict shaped like `{"status": {"result": "..."}}`.
         # Callers passing a bare result code (e.g. "PERFORMED") would silently
@@ -74,14 +78,14 @@ class RemoteServiceStatus:
 class RemoteServices:
     """Trigger remote services on a vehicle."""
 
-    def __init__(self, vehicle: PorscheVehicle):
+    def __init__(self, vehicle: PorscheVehicle) -> None:
         """Initialise the Remote Services on a Porsche Connect vehicle."""
         self._vehicle = vehicle
         self._connection = vehicle.connection
 
     async def flash_indicators(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for flashing the indicators briefly."""
         _LOGGER.debug("Requesting vehicle %s to flash indicators.", self._vehicle.vin)
 
@@ -97,7 +101,7 @@ class RemoteServices:
 
     async def honk_and_flash_indicators(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for honking and flashing the indicators briefly."""
         _LOGGER.debug(
             "Requesting vehicle %s to honk and flash indicators.",
@@ -122,7 +126,7 @@ class RemoteServices:
         front_right: bool = False,
         rear_left: bool = False,
         rear_right: bool = False,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for turning climatisation on."""
         _LOGGER.debug("Starting remote climatisation for %s", self._vehicle.vin)
 
@@ -144,7 +148,7 @@ class RemoteServices:
 
     async def climatise_off(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for turning climatisation off."""
         _LOGGER.debug("Stopping remote climatisation for %s", self._vehicle.vin)
 
@@ -154,7 +158,7 @@ class RemoteServices:
 
     async def direct_charge_on(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for turning direct charging on."""
         _LOGGER.debug("Enabling direct charging for %s", self._vehicle.vin)
 
@@ -164,7 +168,7 @@ class RemoteServices:
 
     async def direct_charge_off(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for turning direct charging off."""
         _LOGGER.debug("Disabling direct charging for %s", self._vehicle.vin)
         payload = {"key": "DIRECT_CHARGING_STOP", "payload": {"spin": None}}
@@ -172,7 +176,7 @@ class RemoteServices:
 
     async def lock_vehicle(
         self,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for locking a vehicle."""
         _LOGGER.debug("Locking vehicle %s", self._vehicle.vin)
         payload = {"key": "LOCK", "payload": {"spin": None}}
@@ -180,28 +184,34 @@ class RemoteServices:
 
     async def unlock_vehicle(
         self,
-        pin,
-    ):
+        pin: str,
+    ) -> RemoteServiceStatus:
         """Remote service for unlocking a vehicle."""
         _LOGGER.debug("Unlocking vehicle %s", self._vehicle.vin)
 
         challenge = await self._get_challenge()
 
-        if challenge:
+        if not challenge:
+            msg = "The vehicle returned no PIN challenge"
+            raise PorscheRemoteServiceError(msg)
+        try:
             pinhash = sha512(bytes.fromhex(pin + challenge)).hexdigest().upper()
+        except ValueError:
+            # Never echo the PIN: only say what is wrong with its form.
+            msg = "The PIN must be made of digits"
+            raise PorscheRemoteServiceError(msg) from None
 
-            payload = {
-                "key": "UNLOCK",
-                "payload": {"spin": {"challenge": challenge, "hash": pinhash}},
-            }
+        payload = {
+            "key": "UNLOCK",
+            "payload": {"spin": {"challenge": challenge, "hash": pinhash}},
+        }
 
-            return await self._send_command(payload)
-        return None
+        return await self._send_command(payload)
 
     async def set_target_soc(
         self,
         target_soc: int | None = None,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for setting target state of charge."""
         if "DEPARTURES" in self._vehicle.data:
             return await self.update_charging_setting(target_soc)
@@ -210,7 +220,7 @@ class RemoteServices:
     async def update_charging_setting(
         self,
         target_soc: int | None = None,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for altering a charging settings."""
         if target_soc is not None:
             target_soc = min(max(int(target_soc), 25), 100)
@@ -221,14 +231,20 @@ class RemoteServices:
         self,
         profile_id: int | None = None,
         minimum_charge_level: int | None = None,
-    ):
+    ) -> RemoteServiceStatus:
         """Remote service for altering a charging profile."""
-        chargingprofileslist = self._vehicle.data["CHARGING_PROFILES"]["list"]
+        chargingprofileslist = (self._vehicle.data.get("CHARGING_PROFILES") or {}).get("list")
         _LOGGER.debug("Charging profile list: %s", chargingprofileslist)
+        if not chargingprofileslist:
+            msg = "The vehicle reports no charging profile"
+            raise PorscheRemoteServiceError(msg)
 
         if profile_id is None:
             # Find active charging profile
-            profile_id = next(p for p in chargingprofileslist if p["isEnabled"] is True)["id"]
+            profile_id = next((p["id"] for p in chargingprofileslist if p.get("isEnabled") is True), None)
+            if profile_id is None:
+                msg = "The vehicle has no active charging profile"
+                raise PorscheRemoteServiceError(msg)
 
         _LOGGER.debug("Active profile id: %s", profile_id)
 
@@ -243,7 +259,7 @@ class RemoteServices:
 
     async def _get_challenge(
         self,
-    ):
+    ) -> str | None:
         payload = {"key": "SPIN_CHALLENGE", "payload": {"spin": None}}
 
         _LOGGER.debug("Requesting challenge for %s", self._vehicle.vin)
@@ -257,8 +273,8 @@ class RemoteServices:
 
     async def _update_charging_profile(
         self,
-        chargingprofileslist,
-    ):
+        chargingprofileslist: list[dict[str, Any]],
+    ) -> RemoteServiceStatus:
         payload = {
             "key": "CHARGING_PROFILES_EDIT",
             "payload": {"list": chargingprofileslist},
@@ -270,7 +286,7 @@ class RemoteServices:
     async def _update_charging_setting(
         self,
         target_soc: int | None = None,
-    ):
+    ) -> RemoteServiceStatus:
         payload = {
             "key": "CHARGING_SETTINGS_EDIT",
             "payload": {
@@ -285,8 +301,8 @@ class RemoteServices:
 
     async def _send_command(
         self,
-        payload,
-    ):
+        payload: dict[str, Any],
+    ) -> RemoteServiceStatus:
         _LOGGER.debug("Executing remote command with payload %s", payload)
 
         response = await self._connection.post(
@@ -313,6 +329,10 @@ class RemoteServices:
             status = await self._block_until_done(status_id)
         else:
             status = RemoteServiceStatus({"status": {"result": result_code}})
+            # Same outcome as an ERROR reached through polling.
+            if status.state == ExecutionState.ERROR:
+                msg = f"Remote service failed with state '{response}'"
+                raise PorscheRemoteServiceError(msg)
 
         await asyncio.sleep(_POLLING_DELAY)
         # A post-command status refresh is best-effort: the command itself
@@ -322,7 +342,8 @@ class RemoteServices:
         except PorscheExceptionError as exc:
             _LOGGER.debug(
                 "Post-command status refresh failed for %s: %s",
-                self._vehicle.vin, exc,
+                self._vehicle.vin,
+                exc,
             )
 
         return status
@@ -330,14 +351,16 @@ class RemoteServices:
     async def _block_until_done(self, status_id: str) -> RemoteServiceStatus:
         """Keep polling the server until we get a final answer.
 
-        :raises TimeoutError: if there is no final answer before _POLLING_TIMEOUT
+        :raises PorscheRemoteServiceError: on ERROR, or with no final answer before _POLLING_TIMEOUT
         """
         fail_after = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
             seconds=_POLLING_TIMEOUT,
         )
         status = None
+        delay = _POLLING_DELAY
         while datetime.datetime.now(datetime.UTC) < fail_after:
-            await asyncio.sleep(_POLLING_DELAY)
+            await asyncio.sleep(delay)
+            delay = min(delay + _POLLING_DELAY, _POLLING_MAX_DELAY)
             status = await self._get_remote_service_status(status_id)
             _LOGGER.debug("Current state of '%s' is: %s", status_id, status.state.value)
             if status.state == ExecutionState.ERROR:

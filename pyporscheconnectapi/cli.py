@@ -7,18 +7,25 @@ import asyncio
 import configparser
 import json
 import logging
+import os
 import sys
+from collections.abc import Callable
 from datetime import date, datetime
 from getpass import getpass
 from pathlib import Path
+from typing import Any
 
-import aiofiles
+try:
+    import aiofiles
+except ImportError:  # pragma: no cover - the CLI extra is not installed
+    sys.exit("The CLI needs its extra dependencies: pip install 'pyporscheconnectapi-bartolije[cli]'")
 
 from pyporscheconnectapi.account import PorscheConnectAccount
 from pyporscheconnectapi.connection import Connection
 from pyporscheconnectapi.exceptions import PorscheCaptchaRequiredError, PorscheWrongCredentialsError
 from pyporscheconnectapi.oauth2 import Captcha
 from pyporscheconnectapi.remote_services import RemoteServices
+from pyporscheconnectapi.vehicle import PorscheVehicle
 
 vehicle_commands = {
     "battery": "Prints the main battery level (BEV)",
@@ -45,14 +52,16 @@ vehicle_commands = {
     "vehicle_closed": "Check if all doors and lids are closed",
 }
 
+printc: Callable[..., None] = print
+printj: Callable[..., None] = print
 try:
     from rich.console import Console
-
+except ImportError:  # pragma: no cover - the CLI extra is not installed
+    pass
+else:
     console = Console()
     printc = console.print
     printj = console.print_json
-except ImportError:
-    pass
 
 logging.basicConfig()
 logging.root.setLevel(logging.WARNING)
@@ -60,7 +69,7 @@ logging.root.setLevel(logging.WARNING)
 _LOGGER = logging.getLogger(__name__)
 
 
-async def load_token(session_file):
+async def load_token(session_file: str | Path) -> dict[str, Any]:
     """Load the cached session token from disk."""
     try:
         async with aiofiles.open(Path(session_file), encoding="utf-8") as json_file:
@@ -71,7 +80,7 @@ async def load_token(session_file):
         return {}
 
 
-async def get_vehicles_with_captcha_retry(controller, connection):
+async def get_vehicles_with_captcha_retry(controller: PorscheConnectAccount, connection: Connection) -> list[PorscheVehicle]:
     """Fetch vehicles, prompting for a CAPTCHA challenge when required."""
     try:
         return await controller.get_vehicles()
@@ -81,9 +90,7 @@ async def get_vehicles_with_captcha_retry(controller, connection):
             await f.write(f'<!doctype html><html lang="en"><title>Captcha</title><body><img src="{captcha_err.captcha}"/></body></html>')
 
         printc(
-            "\n⚠️ CAPTCHA required.\n"
-            f"CAPTCHA image written to: {captcha_file}\n"
-            "Open this file in your browser, solve the CAPTCHA, and enter the text below.",
+            f"\n⚠️ CAPTCHA required.\nCAPTCHA image written to: {captcha_file}\nOpen this file in your browser, solve the CAPTCHA, and enter the text below.",
         )
 
         captcha_code = await async_input("CAPTCHA: ")
@@ -91,19 +98,19 @@ async def get_vehicles_with_captcha_retry(controller, connection):
         return await controller.get_vehicles()
 
 
-async def battery(vehicle, _args):
+async def battery(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get vehicle battery state of charge (%)."""
     await vehicle.get_stored_overview()
     return vehicle.main_battery_level
 
 
-async def capabilities(vehicle, _args):
+async def capabilities(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get vehicle capabilities."""
     await vehicle.get_capabilities()
     return vehicle.capabilities
 
 
-async def chargingprofile(vehicle, args):
+async def chargingprofile(vehicle: PorscheVehicle, args: argparse.Namespace) -> Any:
     """Manipulate charging profile."""
     await vehicle.get_stored_overview()
     service = RemoteServices(vehicle)
@@ -114,7 +121,7 @@ async def chargingprofile(vehicle, args):
     return result.status
 
 
-async def chargingsettings(vehicle, args):
+async def chargingsettings(vehicle: PorscheVehicle, args: argparse.Namespace) -> Any:
     """Edit charging settings."""
     await vehicle.get_stored_overview()
     service = RemoteServices(vehicle)
@@ -124,117 +131,117 @@ async def chargingsettings(vehicle, args):
     return result.status
 
 
-async def climatise_off(vehicle, _args):
+async def climatise_off(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Stop climatisation."""
     service = RemoteServices(vehicle)
     result = await service.climatise_off()
     return result.status
 
 
-async def climatise_on(vehicle, _args):
+async def climatise_on(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Start climatisation."""
     service = RemoteServices(vehicle)
     result = await service.climatise_on()
     return result.status
 
 
-async def connected(vehicle, _args):
+async def connected(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get vehicle on-line status."""
     await vehicle.get_current_overview()
     return vehicle.connected
 
 
-async def currentoverview(vehicle, _args):
+async def currentoverview(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get current overview from vehicle."""
     await vehicle.get_current_overview()
     return vehicle.data
 
 
-async def direct_charge_off(vehicle, _args):
+async def direct_charge_off(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Disable direct charging."""
     service = RemoteServices(vehicle)
     result = await service.direct_charge_off()
     return result.status
 
 
-async def direct_charge_on(vehicle, _args):
+async def direct_charge_on(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Enable direct charging."""
     service = RemoteServices(vehicle)
     result = await service.direct_charge_on()
     return result.status
 
 
-async def doors_and_lids(vehicle, _args):
+async def doors_and_lids(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get stored status of doors and lids from backend."""
     await vehicle.get_stored_overview()
     return vehicle.doors_and_lids
 
 
-async def flash_indicators(vehicle, _args):
+async def flash_indicators(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Flash the indicators briefly."""
     service = RemoteServices(vehicle)
     result = await service.flash_indicators()
     return result.status
 
 
-async def honk_and_flash(vehicle, _args):
+async def honk_and_flash(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Honk and flash the indicators briefly."""
     service = RemoteServices(vehicle)
     result = await service.honk_and_flash_indicators()
     return result.status
 
 
-async def location(vehicle, _args):
+async def location(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get the location of the vehicle."""
     await vehicle.get_stored_overview()
     return vehicle.location
 
 
-async def lock_vehicle(vehicle, _args):
+async def lock_vehicle(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Lock the vehicle."""
     service = RemoteServices(vehicle)
     result = await service.lock_vehicle()
     return result.status
 
 
-async def pictures(vehicle, _args):
+async def pictures(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get pictures (uri) of the vehicle."""
     await vehicle.get_picture_locations()
     return vehicle.picture_locations
 
 
-async def storedoverview(vehicle, _args):
+async def storedoverview(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get stored overview from back-end."""
     await vehicle.get_stored_overview()
     return vehicle.data
 
 
-async def tire_status(vehicle, _args):
+async def tire_status(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get tire pressure status from back-end."""
     await vehicle.get_stored_overview()
     return vehicle.tire_pressure_status
 
 
-async def tire_pressures(vehicle, _args):
+async def tire_pressures(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get tire pressures from back-end."""
     await vehicle.get_stored_overview()
     return vehicle.tire_pressures
 
 
-async def trip_statistics(vehicle, _args):
+async def trip_statistics(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Get pictures (uri) of the vehicle."""
     await vehicle.get_trip_statistics()
     return vehicle.trip_statistics
 
 
-async def unlock_vehicle(vehicle, args):
+async def unlock_vehicle(vehicle: PorscheVehicle, args: argparse.Namespace) -> Any:
     """Unock the vehicle."""
     service = RemoteServices(vehicle)
     result = await service.unlock_vehicle(args.pin)
     return result.status
 
 
-async def vehicle_closed(vehicle, _args):
+async def vehicle_closed(vehicle: PorscheVehicle, _args: argparse.Namespace) -> Any:
     """Check with backend if doors and lids are closed."""
     await vehicle.get_stored_overview()
     return vehicle.vehicle_closed
@@ -246,21 +253,23 @@ async def async_input(prompt: str, *, strip: bool = True) -> str:
     return value.strip() if strip else value
 
 
-async def save_token(session_file, token):
+async def save_token(session_file: str | Path, token: dict[str, Any]) -> None:
     """Save token to file."""
-    async with aiofiles.open(session_file, "w", encoding="utf-8") as f:
+    # The session file holds the tokens: owner-only, also when it already exists.
+    async with aiofiles.open(session_file, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as f:
         await f.write(json.dumps(token, ensure_ascii=False, indent=2))
+    await asyncio.to_thread(os.chmod, session_file, 0o600)
 
 
-def obj_to_json(obj):
+def obj_to_json(obj: object) -> str:
     """Convert Python objects of type 'datetime' or 'date' to json."""
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     msg = f"Can't convert type {type(obj)}"
-    raise TypeError (msg)
+    raise TypeError(msg)
 
 
-async def main(args):
+async def main(args: argparse.Namespace) -> None:
     """Get arguments from parser and run command."""
     token = await load_token(args.session_file)
 
@@ -273,7 +282,7 @@ async def main(args):
     connection = Connection(email, password, token=token)
     controller = PorscheConnectAccount(connection=connection)
 
-    response = {}
+    response: Any = {}
     try:
         if args.command == "token":
             response = controller.token
@@ -283,14 +292,13 @@ async def main(args):
                 printc("No vehicles found.")
 
             if args.command == "list":
-                for vehicle in vehicles:
-                    response = response | vehicle.data
+                response = [vehicle.data for vehicle in vehicles]
             elif args.vin is not None:
                 vehicle = await controller.get_vehicle(args.vin)
                 if vehicle is not None:
                     response = await globals()[args.func](vehicle, args)
             else:
-                sys.exit("--vin or --all is required")
+                sys.exit("--vin is required")
     except PorscheWrongCredentialsError as e:
         sys.exit(e.message)
     else:
@@ -298,11 +306,13 @@ async def main(args):
             printj(json.dumps(response, indent=2, sort_keys=True, default=obj_to_json))
         else:
             printc(response)
-    await connection.close()
-    await save_token(args.session_file, connection.token)
+    finally:
+        # Also on failure: a token refreshed during the run must not be lost.
+        await connection.close()
+        await save_token(args.session_file, connection.token)
 
 
-def add_arg_vin(parser):
+def add_arg_vin(parser: argparse.ArgumentParser) -> None:
     """Add vin to the argument parser."""
     group = parser.add_mutually_exclusive_group(
         required=True,
@@ -310,7 +320,7 @@ def add_arg_vin(parser):
     group.add_argument("-v", "--vin", dest="vin", default=None)
 
 
-def cli():
+def cli() -> None:
     """Get configuration parameters and command line arguments and run main loop."""
     # interpolation=None: passwords routinely contain '%', which the default
     # BasicInterpolation treats as syntax and dies on (InterpolationSyntaxError,
@@ -376,14 +386,6 @@ def cli():
                 required=False,
                 default=None,
                 help="Minimum charge level",
-            )
-            parser_command.add_argument(
-                "--profileactive",
-                dest="profileactive",
-                type=bool,
-                required=False,
-                default=None,
-                help="Profile active status",
             )
         if vcmd == "chargingsettings":
             parser_command.add_argument(

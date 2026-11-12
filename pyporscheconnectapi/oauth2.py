@@ -11,7 +11,7 @@ import re
 import secrets
 import time
 from functools import partial
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
@@ -59,25 +59,25 @@ _MAX_RESUME_REDIRECTS = 10
 class Credentials(NamedTuple):
     """Store credentials for the Porsche Connect API."""
 
-    email: str
-    password: str
+    email: str | None
+    password: str | None
 
 
 class Captcha(NamedTuple):
     """Store captcha data for the Porsche Connect API."""
 
-    captcha_code: str
-    state: str
+    captcha_code: str | None
+    state: str | None
 
 
-class OAuth2Token(dict):
+class OAuth2Token(dict[str, Any]):
     """A simple wrapper around a dict to handle OAuth2 tokens.
 
     Provides a helper method to check if the token is expired.
     Originally based on: https://github.com/lepture/authlib/blob/master/authlib/oauth2/rfc6749/wrappers.py
     """
 
-    def __init__(self, params: dict):
+    def __init__(self, params: dict[str, Any]) -> None:
         """Initialise the oauth2 token."""
         if params.get("expires_at"):
             self["expires_at"] = int(params["expires_at"])
@@ -85,7 +85,7 @@ class OAuth2Token(dict):
             self.expires_at = params["expires_in"]
         super().__init__(params)
 
-    def is_expired(self, leeway=60):
+    def is_expired(self, leeway: int = 60) -> bool | None:
         """Return true if the access token has expired."""
         expires_at = self.get("expires_at")
         if not expires_at:
@@ -95,23 +95,24 @@ class OAuth2Token(dict):
         return expiration_threshold < time.time()
 
     @property
-    def expires_at(self):
+    def expires_at(self) -> int | None:
         """Return the expiration time stamp of the access token."""
         return self.get("expires_at")
 
+    @expires_at.setter
+    def expires_at(self, expires_in: float | str) -> None:
+        """Set the expiration time stamp from a lifetime in seconds."""
+        self["expires_at"] = int(time.time()) + int(expires_in)
+
     @property
-    def access_token(self):
+    def access_token(self) -> str | None:
         """Return the access token."""
         return self.get("access_token")
 
     @property
-    def refresh_token(self):
+    def refresh_token(self) -> str | None:
         """Return the refresh token."""
         return self.get("refresh_token")
-
-    @expires_at.setter
-    def expires_at(self, expires_in):
-        self["expires_at"] = int(time.time()) + int(expires_in)
 
 
 class OAuth2Client:
@@ -130,7 +131,7 @@ class OAuth2Client:
         leeway: int = 60,
         *,
         code_verifier: str | None = None,
-    ):
+    ) -> None:
         """Initialise the oauth2 client."""
         self.client = client
         self.credentials = credentials
@@ -148,7 +149,7 @@ class OAuth2Client:
         digest = hashlib.sha256(verifier.encode("ascii")).digest()
         return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
-    async def ensure_valid_token(self, token: OAuth2Token):
+    async def ensure_valid_token(self, token: OAuth2Token) -> None:
         """Ensure the access_token is valid, logging in or refreshing if necessary."""
         token_is_expired = token.is_expired(self.leeway)
         if token_is_expired:
@@ -164,7 +165,7 @@ class OAuth2Client:
             token.expires_at = token_data["expires_in"]
             _LOGGER.debug("Got a new access token (received: %s).", token.access_token is not None)
 
-    async def fetch_authorization_code(self):
+    async def fetch_authorization_code(self) -> str:
         """Fetch the authorization code from Porsche Connect.
 
         Requires 1-4 requests (1 if already logged in, 4 if not):
@@ -227,6 +228,13 @@ class OAuth2Client:
 
         except httpx.HTTPStatusError as exc:
             raise PorscheExceptionError(exc.response.status_code) from exc
+        except httpx.TransportError as exc:
+            msg = f"transport error during login: {exc.__class__.__name__}"
+            raise PorscheExceptionError(msg) from exc
+        finally:
+            # A captcha code is single-use: left in place, the next full login
+            # (months later, refresh token expired) would replay a dead state.
+            self.captcha = Captcha(None, None)
 
         _LOGGER.debug("Got the authorization code.")
         return authorization_code
@@ -254,7 +262,7 @@ class OAuth2Client:
         msg = f"Auth0 resume returned no authorization code after {len(_RESUME_POLL_DELAYS)} attempts"
         raise PorscheExceptionError(msg) from last_error
 
-    async def get_and_extract_location_params(self, url, params=None):
+    async def get_and_extract_location_params(self, url: str, params: dict[str, str] | None = None) -> dict[str, list[str]]:
         """GET the URL and extract the params from the Location header.
 
         :param url: URL to GET
@@ -279,7 +287,7 @@ class OAuth2Client:
         location = resp.headers["Location"]
         return self._extract_params_from_url(location)
 
-    def _extract_params_from_url(self, url):
+    def _extract_params_from_url(self, url: str) -> dict[str, list[str]]:
         """Extract the query parameters from a URL.
 
         :param url: URL to extract the query parameters from
@@ -309,7 +317,7 @@ class OAuth2Client:
         except Exception:  # noqa: BLE001 - a parser failure must never mask the auth error
             return None
         candidates = (
-            soup.find(attrs={"role": "alert"}),
+            soup.find(role="alert"),
             soup.find(class_=re.compile(r"ulp-error|error-info|error-message")),
             soup.find(id=re.compile(r"^error-element-")),
         )
@@ -318,28 +326,21 @@ class OAuth2Client:
                 return text[:200]
         return None
 
-    def _extract_captcha_image(self, html: str):
+    def _extract_captcha_image(self, html: str) -> str | None:
         """Extract the captcha image from Auth0 ACUL or legacy login HTML."""
-        script_match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
-        if script_match:
-            try:
-                decoded_json = base64.b64decode(script_match.group(1)).decode("utf-8")
-                context_data = json.loads(decoded_json)
-            except (ValueError, json.JSONDecodeError, binascii.Error) as exc:
-                _LOGGER.warning("Failed to parse Auth0 ACUL context: %s", exc)
-            else:
-                captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
-                if captcha_img:
-                    _LOGGER.debug(
-                        "Parsed captcha from Auth0 ACUL context (length: %d)",
-                        len(captcha_img),
-                    )
-                    return captcha_img
+        context_data = self._extract_universal_login_context(html) or {}
+        captcha_img = context_data.get("screen", {}).get("captcha", {}).get("image")
+        if captcha_img:
+            _LOGGER.debug(
+                "Parsed captcha from Auth0 ACUL context (length: %d)",
+                len(captcha_img),
+            )
+            return captcha_img
 
         soup = BeautifulSoup(html, "html.parser")
-        img_tag = soup.find("img", {"alt": "captcha"})
-        if img_tag:
-            return img_tag.get("src")
+        img_tag = soup.find("img", alt="captcha")
+        if img_tag and (src := img_tag.get("src")):
+            return str(src)
 
         svg_match = re.search(r"(data:image/svg[^ ]+)", html)
         if svg_match:
@@ -347,7 +348,7 @@ class OAuth2Client:
 
         return None
 
-    def _extract_universal_login_context(self, html: str) -> dict | None:
+    def _extract_universal_login_context(self, html: str) -> dict[str, Any] | None:
         """Extract the Auth0 universal login context from the inline base64 payload."""
         match = re.search(r'atob\("([A-Za-z0-9+/=]+)"', html)
         if not match:
@@ -451,7 +452,7 @@ class OAuth2Client:
         msg = "AUTHORIZATION_CODE_REDIRECT_LOOP"
         raise PorscheExceptionError(msg)
 
-    async def login_with_identifier(self, state: str):
+    async def login_with_identifier(self, state: str | None) -> str:
         """Log into the Identifier First flow.
 
         Takes 2 steps:
@@ -566,7 +567,7 @@ class OAuth2Client:
 
         return resume_url
 
-    async def fetch_access_token(self, authorization_code):
+    async def fetch_access_token(self, authorization_code: str) -> dict[str, Any]:
         """Exchanges the authorization code for an access token.
 
         :param authorization_code: authorization code from the /authorize request
@@ -596,12 +597,15 @@ class OAuth2Client:
                 response_body=exc.response.text[:1000] or None,
             ) from exc
 
-    async def refresh_token(self, refresh_token):
+    async def refresh_token(self, refresh_token: str | None) -> dict[str, Any]:
         """Use the provided refresh token to get a new access token.
 
         :param refresh_token: refresh token
         :return: access token
         """
+        if not refresh_token:
+            # Nothing to refresh with: same outcome as a rejected refresh token.
+            return {"access_token": None, "expires_in": 0}
         data = {
             "client_id": CLIENT_ID,
             "grant_type": "refresh_token",

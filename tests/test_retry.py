@@ -1,4 +1,5 @@
 """Unit tests for the shared retry policy (no network, no respx)."""
+
 from __future__ import annotations
 
 import asyncio
