@@ -9,7 +9,7 @@ CLIENT_ID = "XhygisuebbrqQ80byOuU5VncxLIm8E6H"
 X_CLIENT_ID = "41843fb4-691d-4970-85c7-2673e8ecef40"
 # The Porsche app user agent: the API only wakes the car up for
 # currentoverview requests that carry it.
-USER_AGENT = "de.porsche.one/20.26.36-row+186611 (android)"
+USER_AGENT = "de.porsche.one/21.26.46-row+195601 (android)"
 API_BASE_URL = "https://api.ppa.porsche.com/app"
 AUTHORIZATION_URL = f"https://{AUTHORIZATION_SERVER}/authorize"
 TOKEN_URL = f"https://{AUTHORIZATION_SERVER}/oauth/token"
