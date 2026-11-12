@@ -269,7 +269,7 @@ class RemoteServices:
             json=payload,
         )
 
-        return response.get("data", {}).get("challenge")
+        return ((response or {}).get("data") or {}).get("challenge")
 
     async def _update_charging_profile(
         self,

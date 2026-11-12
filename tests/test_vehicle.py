@@ -632,3 +632,32 @@ def test_main_battery_level_of_a_plug_in_hybrid(authed_connection: Connection):
 )
 def test_vehicle_locked_is_unknown_when_not_reported(authed_connection: Connection, data, expected):
     assert PorscheVehicle(vin="WP0ZZZY1ZZS000001", data=data, connection=authed_connection).vehicle_locked is expected
+
+
+@pytest.mark.asyncio
+async def test_debug_log_has_no_position_pairing_code_or_full_vin(authed_connection: Connection, api_routes, caplog):
+    vin = "WP0ZZZY1ZZS000001"
+    api_routes.get(url__regex=rf"/connect/v1/vehicles/{vin}.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "vin": vin,
+                "measurements": [
+                    {"key": "GPS_LOCATION", "status": {"isEnabled": True}, "value": {"location": "48.8584,2.2945"}},
+                    {"key": "PAIRING_CODE", "status": {"isEnabled": True}, "value": {"code": "SECRETPAIR"}},
+                    {"key": "MILEAGE", "status": {"isEnabled": True}, "value": {"kilometers": 1234}},
+                ],
+            },
+        ),
+    )
+    vehicle = PorscheVehicle(vin=vin, connection=authed_connection)
+    caplog.set_level("DEBUG", logger="pyporscheconnectapi.vehicle")
+
+    await vehicle.get_stored_overview()
+
+    dumps = "\n".join(r.getMessage() for r in caplog.records if "\n" in r.getMessage())
+    assert "1234" in dumps
+    assert "48.8584" not in dumps
+    assert "SECRETPAIR" not in dumps
+    assert vin not in dumps
+    assert vehicle.location[0] == 48.8584

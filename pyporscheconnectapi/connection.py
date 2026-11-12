@@ -54,6 +54,7 @@ class Connection:
         # Create a client lazily when none is supplied. A module-level default
         # (httpx.AsyncClient()) would be evaluated once at import and shared by
         # every Connection instance, breaking test isolation and CLI reuse.
+        self._owns_client = async_client is None
         self.asyncClient: AsyncClient = async_client if async_client is not None else httpx.AsyncClient()
         if cookies:
             # Restore the Auth0 transaction (PorscheCaptchaRequiredError.cookies)
@@ -82,7 +83,11 @@ class Connection:
 
     async def get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         """Make a GET request to the Porsche Connect API."""
-        return await self.request("GET", url, params=params)
+        data = await self.request("GET", url, params=params)
+        if data is None:
+            msg = f"Empty response on {url.partition('?')[0]}"
+            raise PorscheExceptionError(msg, request_url=url.partition("?")[0])
+        return data
 
     async def post(self, url: str, data: Any = None, json: Any = None) -> Any:
         """Make a POST request to the Porsche Connect API."""
@@ -125,17 +130,19 @@ class Connection:
             )
 
         reauthed = False
+        # In logs and errors: the path, without the long measurement list.
+        path = url.partition("?")[0]
         while True:
             # Only reads are replayed: a 504 or a timeout does not say whether a
             # command reached the car, and sending it again could run it twice.
-            resp = await send_with_retries(_send, description=url, max_retries=MAX_RETRIES if method == "GET" else 0)
+            resp = await send_with_retries(_send, description=path, max_retries=MAX_RETRIES if method == "GET" else 0)
             # A 401 means the access token was rejected server-side (revoked,
             # clock skew, ...). Force one re-authentication and retry before
             # giving up - avoids a spurious reauth/captcha prompt in HA for a
             # token a refresh can still recover.
             if resp.status_code == HTTP_UNAUTHORIZED and not reauthed:
                 reauthed = True
-                _LOGGER.warning("401 on %s - forcing token refresh and retrying once", url)
+                _LOGGER.warning("401 on %s - forcing token refresh and retrying once", path)
                 async with self.token_lock:
                     # Non-zero past timestamp on purpose: is_expired() treats
                     # 0 as "no expiry info" (→ full re-login), whereas 1
@@ -149,16 +156,17 @@ class Connection:
                 continue
             # Not raise_for_status(): its exception class depends on the client library.
             if resp.status_code >= HTTP_ERROR:
-                raise PorscheExceptionError(resp.status_code, request_url=url)
+                raise PorscheExceptionError(resp.status_code, request_url=path)
             if not resp.content:
                 return None
             try:
                 return resp.json()
             except ValueError as exc:
                 # e.g. an HTML maintenance page served with a 200.
-                msg = f"Non-JSON response (HTTP {resp.status_code}) on {url}"
-                raise PorscheExceptionError(msg, request_url=url) from exc
+                msg = f"Non-JSON response (HTTP {resp.status_code}) on {path}"
+                raise PorscheExceptionError(msg, request_url=path) from exc
 
     async def close(self) -> None:
-        """Close the asyncClient connection."""
-        await self.asyncClient.aclose()
+        """Close the HTTP client, unless the caller supplied it: it is theirs to close."""
+        if self._owns_client:
+            await self.asyncClient.aclose()
