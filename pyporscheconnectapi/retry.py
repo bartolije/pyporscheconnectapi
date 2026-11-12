@@ -21,6 +21,24 @@ from .exceptions import PorscheExceptionError
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    import httpx2
+
+    # Home Assistant 2026.11+ hands the library an httpx2 client. Same API,
+    # but separate classes: nothing here may rely on isinstance(httpx.…).
+    type AsyncClient = httpx.AsyncClient | httpx2.AsyncClient
+    type Response = httpx.Response | httpx2.Response
+    type Cookies = httpx.Cookies | httpx2.Cookies
+
+# httpx2 exceptions do not inherit from the httpx ones, so both families are
+# listed. httpx2 is optional: only a caller that passes an httpx2 client has it.
+TRANSPORT_ERRORS: tuple[type[Exception], ...] = (httpx.TransportError,)
+try:
+    import httpx2 as _httpx2
+except ImportError:  # pragma: no cover - httpx2 is installed in the test environment
+    pass
+else:
+    TRANSPORT_ERRORS += (_httpx2.TransportError,)
+
 _LOGGER = logging.getLogger(__name__)
 
 # HTTP status codes that justify a retry (transient server-side issues).
@@ -34,7 +52,7 @@ MAX_RETRIES = 3
 MAX_RETRY_DELAY = 30.0
 
 
-def compute_retry_delay(response: httpx.Response | None, attempt: int) -> float:
+def compute_retry_delay(response: Response | None, attempt: int) -> float:
     """Return how many seconds to wait before retrying after a transient error.
 
     Prefer the server-provided Retry-After header (RFC 9110 §10.2.3) when
@@ -51,11 +69,11 @@ def compute_retry_delay(response: httpx.Response | None, attempt: int) -> float:
 
 
 async def send_with_retries(
-    send: Callable[[], Awaitable[httpx.Response]],
+    send: Callable[[], Awaitable[Response]],
     *,
     description: str,
     max_retries: int = MAX_RETRIES,
-) -> httpx.Response:
+) -> Response:
     """Await ``send()`` until it yields a non-transient response.
 
     Retries 429/502/503/504 and httpx transport errors with backoff. The
@@ -67,7 +85,7 @@ async def send_with_retries(
     for attempt in range(max_retries + 1):
         try:
             response = await send()
-        except httpx.TransportError as exc:
+        except TRANSPORT_ERRORS as exc:
             if attempt == max_retries:
                 msg = f"transport error on {description}: {exc}"
                 raise PorscheExceptionError(msg) from exc

@@ -44,7 +44,7 @@ packages = ["pyporscheconnectapi"]
 pyporscheconnectapi = ["py.typed"]
 
 [tool.mypy]
-files = ["pyporscheconnectapi"]
+files = ["pyporscheconnectapi", "examples", "scripts"]
 disallow_untyped_defs = true
 check_untyped_defs = true
 warn_unused_ignores = true

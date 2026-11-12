@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -15,9 +15,13 @@ from .exceptions import PorscheExceptionError
 from .oauth2 import Captcha, Credentials, OAuth2Client, OAuth2Token
 from .retry import send_with_retries
 
+if TYPE_CHECKING:
+    from .retry import AsyncClient, Response
+
 _LOGGER = logging.getLogger(__name__)
 
 HTTP_UNAUTHORIZED = 401
+HTTP_ERROR = 400
 
 
 class Connection:
@@ -25,7 +29,7 @@ class Connection:
 
     :param email: Porsche Connect email
     :param password: Porsche Connect password
-    :param asyncClient: httpx.AsyncClient or None
+    :param async_client: httpx.AsyncClient or httpx2.AsyncClient (Home Assistant), or None to create one
     :param token: token dict - should be a dict with access_token, refresh_token, expires_at, etc as root params
     :param leeway: time in seconds to consider token as expired before it actually expires
     :param cookies: serialised Auth0 session (PorscheCaptchaRequiredError.cookies)
@@ -38,7 +42,7 @@ class Connection:
         password: str | None = None,
         captcha_code: str | None = None,
         state: str | None = None,
-        async_client: httpx.AsyncClient | None = None,
+        async_client: AsyncClient | None = None,
         token: dict[str, Any] | None = None,
         leeway: int = 60,
         cookies: list[dict] | None = None,
@@ -50,7 +54,7 @@ class Connection:
         # Create a client lazily when none is supplied. A module-level default
         # (httpx.AsyncClient()) would be evaluated once at import and shared by
         # every Connection instance, breaking test isolation and CLI reuse.
-        self.asyncClient = async_client if async_client is not None else httpx.AsyncClient()
+        self.asyncClient: AsyncClient = async_client if async_client is not None else httpx.AsyncClient()
         if cookies:
             # Restore the Auth0 transaction (PorscheCaptchaRequiredError.cookies)
             # so the captcha retry can resume the Identifier First flow started
@@ -107,7 +111,7 @@ class Connection:
 
         sent_token = None
 
-        async def _send() -> httpx.Response:
+        async def _send() -> Response:
             # Headers rebuilt on every attempt: the access token may have
             # been refreshed by the 401 path below.
             nonlocal sent_token
@@ -141,10 +145,9 @@ class Connection:
                         self.token["expires_at"] = 1
                     await self.oauth2_client.ensure_valid_token(self.token)
                 continue
-            try:
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise PorscheExceptionError(resp.status_code, request_url=url) from exc
+            # Not raise_for_status(): its exception class depends on the client library.
+            if resp.status_code >= HTTP_ERROR:
+                raise PorscheExceptionError(resp.status_code, request_url=url)
             if not resp.content:
                 return None
             try:
