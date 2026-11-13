@@ -23,7 +23,7 @@ Porsche Connect is available for the following Porsche models:
 You can also take a look here, select your model and see if your model has support for Porsche Connect:
 https://connect-store.porsche.com/
 
-A Porsche Connect subscription alse needs to be active for it to work.
+A Porsche Connect subscription also needs to be active for it to work.
 
 *NOTE:* This work is not officially supported by Porsche and functionality can stop working at any time without warning.
 
@@ -94,6 +94,9 @@ options:
   -p, --password PASSWORD
   -s, --sessionfile SESSION_FILE
 ```
+
+`list` prints the vehicles of the account. `token` checks the session and prints
+it with the tokens masked: the tokens themselves stay in the session file.
 
 ## Config file (for CLI)
 
