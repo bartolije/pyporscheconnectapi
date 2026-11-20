@@ -5,5 +5,5 @@ pytest
 pytest-asyncio
 pytest-cov
 respx
-ruff==0.17.4
+ruff==0.17.5
 types-aiofiles
